@@ -7,7 +7,7 @@ An (experimental) code generation library for .surql files.
 
 ```toml
 [dev_dependencies]
-surreal_gen = { git = "https://github.com/Remy2701/surreal_gen.git", ref = "v0.2.0" }
+surreal_gen = { git = "https://github.com/Remy2701/surreal_gen.git", ref = "v0.2.1" }
 ```
 
 ```sh
