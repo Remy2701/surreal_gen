@@ -183,6 +183,29 @@ pub fn field_of(
   |> module.function_call.add(getter)
 }
 
+pub fn optional_field() -> Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("serialize"),
+    module.identifier.create("optional_field"),
+  ))
+  |> module.add_import(["dynamic", "serialize"])
+}
+
+pub fn optional_field_of(
+  context: Module,
+  name: Module,
+  default: Module,
+  serializer: Module,
+  getter: Module,
+) -> Module {
+  optional_field()
+  |> module.function_call.add(context)
+  |> module.function_call.add(name)
+  |> module.function_call.add(default)
+  |> module.function_call.add(serializer)
+  |> module.function_call.add(getter)
+}
+
 pub fn build() -> Module {
   module.function_call.create(module.binop.access(
     module.identifier.create("serialize"),

@@ -1094,44 +1094,66 @@ fn backstage_generate_type_serializer(
   )
   |> module.function_definition.add(backstage_serialize_module.object_of(
     list.map(fields, fn(field) {
-      module.use_expression.create(backstage_serialize_module.field_of(
-        module.identifier.create("context"),
-        module.literal.string(field.name),
-        case field.linked_enum, field.object_fields, field.type_ {
-          option.Some(enum), _, surreal_type.Option(_) -> {
-            backstage_serialize_module.optional_of(
-              module.function_call.create(module.identifier.create(
-                enum <> "_serializer",
-              )),
-            )
-          }
-          option.Some(enum), _, _ ->
+      let inner_serializer = case
+        field.linked_enum,
+        field.object_fields,
+        field.type_
+      {
+        option.Some(enum), _, surreal_type.Option(_) -> {
+          backstage_serialize_module.optional_of(
             module.function_call.create(module.identifier.create(
               enum <> "_serializer",
-            ))
-          _, [_, ..], surreal_type.Object ->
+            )),
+          )
+        }
+        option.Some(enum), _, _ ->
+          module.function_call.create(module.identifier.create(
+            enum <> "_serializer",
+          ))
+        _, [_, ..], surreal_type.Object ->
+          module.function_call.create(module.identifier.create(
+            field.name <> "_serializer",
+          ))
+        _, [_, ..], surreal_type.Array(surreal_type.Object) -> {
+          backstage_serialize_module.list_of(
             module.function_call.create(module.identifier.create(
               field.name <> "_serializer",
-            ))
-          _, [_, ..], surreal_type.Array(surreal_type.Object) -> {
-            backstage_serialize_module.list_of(
-              module.function_call.create(module.identifier.create(
-                field.name <> "_serializer",
-              )),
-            )
-          }
-          _, _, _ -> decoder_of(config, field.type_)
-        },
-        module.function_definition.create()
-          |> module.function_definition.add_parameter(
-            "data",
-            module_common.type_identifier(name),
+            )),
           )
-          |> module.function_definition.add(module.binop.access(
-            module.identifier.create("data"),
-            module.identifier.create(field.name),
-          )),
-      ))
+        }
+        _, _, _ -> decoder_of(config, field.type_)
+      }
+      let inner_getter =
+        module.function_definition.create()
+        |> module.function_definition.add_parameter(
+          "data",
+          module_common.type_identifier(name),
+        )
+        |> module.function_definition.add(module.binop.access(
+          module.identifier.create("data"),
+          module.identifier.create(field.name),
+        ))
+      case field.type_ {
+        surreal_type.Option(_) -> {
+          module.use_expression.create(
+            backstage_serialize_module.optional_field_of(
+              module.identifier.create("context"),
+              module.literal.string(field.name),
+              option_module.none(),
+              inner_serializer,
+              inner_getter,
+            ),
+          )
+        }
+        _ -> {
+          module.use_expression.create(backstage_serialize_module.field_of(
+            module.identifier.create("context"),
+            module.literal.string(field.name),
+            inner_serializer,
+            inner_getter,
+          ))
+        }
+      }
       |> module.use_expression.add("context")
       |> module.use_expression.add(field.name)
     })

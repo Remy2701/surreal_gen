@@ -9,3 +9,11 @@ pub fn type_(inner: Module) -> Module {
   |> module.function_call.add(inner)
   |> module.add_import(["gleam", "option"])
 }
+
+pub fn none() -> Module {
+  module.binop.access(
+    module.identifier.create("option"),
+    module.identifier.create("None"),
+  )
+  |> module.add_import(["gleam", "option"])
+}
