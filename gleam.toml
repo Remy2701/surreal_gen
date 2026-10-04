@@ -6,8 +6,7 @@ gleam_stdlib = ">= 1.0.0 and < 2.0.0"
 simplifile = ">= 2.4.0 and < 3.0.0"
 argv = ">= 1.1.0 and < 2.0.0"
 shellout = ">= 1.8.0 and < 2.0.0"
-# surreal = { git = "https://github.com/Remy2701/surreal.git", ref = "v0.1.8" }
-surreal = { path = "../surreal" }
+surreal = { git = "https://github.com/Remy2701/surreal.git", ref = "v0.1.9" }
 module = { git = "https://github.com/Remy2701/module.git", ref = "v0.1.4" }
 clip = ">= 1.2.2 and < 2.0.0"
 
