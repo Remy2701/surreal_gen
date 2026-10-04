@@ -6,11 +6,10 @@ gleam_stdlib = ">= 1.0.0 and < 2.0.0"
 simplifile = ">= 2.4.0 and < 3.0.0"
 argv = ">= 1.1.0 and < 2.0.0"
 shellout = ">= 1.8.0 and < 2.0.0"
-pprint = ">= 1.0.6 and < 2.0.0"
-gleamgen = ">= 1.0.4 and < 2.0.0"
-gleam_deque = ">= 1.0.0 and < 2.0.0"
-surreal = { git = "https://github.com/Remy2701/surreal.git", ref = "main" }
-module = { git = "https://github.com/Remy2701/module.git", ref = "main" }
+# surreal = { git = "https://github.com/Remy2701/surreal.git", ref = "v0.1.8" }
+surreal = { path = "../surreal" }
+module = { git = "https://github.com/Remy2701/module.git", ref = "v0.1.4" }
+clip = ">= 1.2.2 and < 2.0.0"
 
 [dev_dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

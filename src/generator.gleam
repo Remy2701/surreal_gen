@@ -4,19 +4,79 @@ import gleam/dict
 import gleam/function
 import gleam/io
 import gleam/list
-import gleam/option
+import gleam/option.{None, Some}
 import gleam/order
 import gleam/pair
 import gleam/result
 import gleam/set
 import gleam/string
 import module
+import module/backstage_serialize_module
+import module/decode_module
+import module/module_common
+import module/option_module
 import surreal/node
-import surreal_type
+import surreal_type.{type SurrealType}
 
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 //                                     Table Type Definition                                     //
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+
+fn generate_type_definition_field(
+  module: module.Module,
+  field: extractor.TableField,
+) {
+  module
+  |> module.type_variant.field(Some(field.name), case field.linked_enum {
+    Some(enum) -> {
+      let inner = case string.split_once(enum, ".") {
+        Ok(#(module_str, name)) -> {
+          module.binop.access(
+            module.identifier.create(module_str),
+            module.identifier.create(common.string_to_pascal_case(name)),
+          )
+        }
+        _ -> {
+          module.identifier.create(common.string_to_pascal_case(enum))
+        }
+      }
+
+      case field.type_ {
+        surreal_type.Option(_) -> option_module.type_(inner)
+        _ -> inner
+      }
+    }
+    None -> {
+      case field.object_fields {
+        [] -> {
+          module.identifier.create(surreal_type.to_gleam_type_str(field.type_))
+        }
+        [_, ..] ->
+          case field.type_ {
+            surreal_type.Array(surreal_type.Object) -> {
+              module.function_call.create(module.identifier.create("List"))
+              |> module.function_call.add(
+                common.string_to_pascal_case(field.name)
+                |> module.identifier.create(),
+              )
+            }
+            surreal_type.Object -> {
+              module.identifier.create(common.string_to_pascal_case(field.name))
+            }
+            _ -> {
+              io.println(
+                "Warning: unsupported object field type for `"
+                <> field.name
+                <> "`: "
+                <> surreal_type.to_gleam_type_str(field.type_),
+              )
+              module.identifier.create(common.string_to_pascal_case(field.name))
+            }
+          }
+      }
+    }
+  })
+}
 
 fn generate_type_definition(
   name: String,
@@ -26,205 +86,173 @@ fn generate_type_definition(
   |> module.type_definition.public()
   |> module.type_definition.add(
     module.type_variant.create(common.string_to_pascal_case(name))
-    |> list.fold(fields, _, fn(module, field) {
-      module
-      |> module.type_variant.field(
-        option.Some(field.name),
-        case field.linked_enum {
-          option.Some(enum) -> {
-            let inner = case string.split_once(enum, ".") {
-              Ok(#(module_str, name)) -> {
-                module.binop.access(
-                  module.identifier.create(module_str),
-                  module.identifier.create(common.string_to_pascal_case(name)),
-                )
-              }
-              _ -> {
-                module.identifier.create(common.string_to_pascal_case(enum))
-              }
-            }
-
-            case field.type_ {
-              surreal_type.Option(_) -> {
-                module.binop.access(
-                  module.identifier.create("option"),
-                  module.identifier.create("Option"),
-                )
-                |> module.function_call.create()
-                |> module.function_call.add(inner)
-                |> module.add_import(["gleam", "option"])
-              }
-              _ -> inner
-            }
-          }
-          option.None ->
-            case field.object_fields {
-              [] -> {
-                module.identifier.create(surreal_type.to_gleam_type_str(
-                  field.type_,
-                ))
-              }
-              [_, ..] ->
-                case field.type_ {
-                  surreal_type.Array(surreal_type.Object) -> {
-                    module.function_call.create(module.identifier.create("List"))
-                    |> module.function_call.add(
-                      common.string_to_pascal_case(field.name)
-                      |> module.identifier.create(),
-                    )
-                  }
-                  surreal_type.Object -> {
-                    module.identifier.create(common.string_to_pascal_case(
-                      field.name,
-                    ))
-                  }
-                  _ -> {
-                    io.println(
-                      "Warning: unsupported object field type for `"
-                      <> field.name
-                      <> "`: "
-                      <> surreal_type.to_gleam_type_str(field.type_),
-                    )
-                    module.identifier.create(common.string_to_pascal_case(
-                      field.name,
-                    ))
-                  }
-                }
-            }
-        },
-      )
-    }),
+    |> list.fold(fields, _, generate_type_definition_field),
   )
 }
 
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 //                                     Table Type `to_json`                                      //
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+
+fn generate_datetime_to_json(name: String) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("string"),
+  ))
+  |> module.function_call.add(
+    module.function_call.create(module.binop.access(
+      module.identifier.create("timestamp"),
+      module.identifier.create("to_rfc3339"),
+    ))
+    |> module.function_call.add(module.identifier.create(name))
+    |> module.function_call.add(module.binop.access(
+      module.identifier.create("calendar"),
+      module.identifier.create("utc_offset"),
+    )),
+  )
+  |> module.add_import(["gleam", "json"])
+  |> module.add_import(["gleam", "time", "timestamp"])
+  |> module.add_import(["gleam", "time", "calendar"])
+}
+
+fn generate_int_to_json(name: String) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("int"),
+  ))
+  |> module.function_call.add(module.identifier.create(name))
+  |> module.add_import(["gleam", "json"])
+}
+
+fn generate_float_to_json(name: String) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("float"),
+  ))
+  |> module.function_call.add(module.identifier.create(name))
+  |> module.add_import(["gleam", "json"])
+}
+
+fn generate_string_to_json(name: String) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("string"),
+  ))
+  |> module.function_call.add(module.identifier.create(name))
+  |> module.add_import(["gleam", "json"])
+}
+
+fn generate_identifier_to_json(name: String) {
+  module.identifier.create(name)
+  |> module.binop.pipe(module.binop.access(
+    module.identifier.create("identifier"),
+    module.identifier.create("to_string"),
+  ))
+  |> module.binop.pipe(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("string"),
+  ))
+  |> module.add_import(["gleam", "json"])
+  |> module.add_import(["surreal", "identifier"])
+}
+
+fn generate_record_to_json(name: String, inner: String) {
+  module.identifier.create(name)
+  |> module.binop.pipe(
+    module.function_call.create(module.binop.access(
+      module.identifier.create("record"),
+      module.identifier.create("to_json"),
+    ))
+    |> module.function_call.add(module.binop.access(
+      module.identifier.create(
+        string.split(inner, ".") |> list.first() |> result.unwrap(inner),
+      ),
+      module.identifier.create("to_json"),
+    )),
+  )
+  |> module.add_import(["surreal", "record"])
+}
+
+fn generate_point_to_json(name: String) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("point"),
+    module.identifier.create("to_json"),
+  ))
+  |> module.function_call.add(module.identifier.create(name))
+  |> module.add_import(["surreal", "point"])
+}
+
+fn generate_bool_to_json(name: String) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("bool"),
+  ))
+  |> module.function_call.add(module.identifier.create(name))
+  |> module.add_import(["gleam", "json"])
+}
+
+fn generate_option_to_json(name: String, inner: SurrealType) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("nullable"),
+  ))
+  |> module.function_call.add(module.identifier.create(name))
+  |> module.function_call.add(
+    module.function_definition.create()
+    |> module.function_definition.add_untyped_parameter("value")
+    |> module.function_definition.add(generate_to_json_for_type("value", inner)),
+  )
+  |> module.add_import(["gleam", "json"])
+}
+
+fn generate_array_to_json(name: String, inner: SurrealType) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("array"),
+  ))
+  |> module.function_call.add(module.identifier.create(name))
+  |> module.function_call.add(
+    module.function_definition.create()
+    |> module.function_definition.add_untyped_parameter("value")
+    |> module.function_definition.add(generate_to_json_for_type("value", inner)),
+  )
+  |> module.add_import(["gleam", "json"])
+}
+
+fn generate_object_to_json(name: String) {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json_value"),
+    module.identifier.create("to_json"),
+  ))
+  |> module.function_call.add(module.identifier.create(name))
+  |> module.add_import(["json_value"])
+}
+
+fn generate_none_to_json() {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("null"),
+  ))
+  |> module.add_import(["gleam", "json"])
+}
 
 fn generate_to_json_for_type(
   name: String,
-  type_: surreal_type.SurrealType,
+  type_: SurrealType,
 ) -> module.Module {
   case type_ {
-    surreal_type.Datetime ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("string"),
-      ))
-      |> module.function_call.add(
-        module.function_call.create(module.binop.access(
-          module.identifier.create("birl"),
-          module.identifier.create("to_iso8601"),
-        ))
-        |> module.function_call.add(module.identifier.create(name)),
-      )
-      |> module.add_import(["gleam", "json"])
-      |> module.add_import(["birl"])
-    surreal_type.Int ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("int"),
-      ))
-      |> module.function_call.add(module.identifier.create(name))
-      |> module.add_import(["gleam", "json"])
-    surreal_type.Float ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("float"),
-      ))
-      |> module.function_call.add(module.identifier.create(name))
-      |> module.add_import(["gleam", "json"])
-    surreal_type.String ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("string"),
-      ))
-      |> module.function_call.add(module.identifier.create(name))
-      |> module.add_import(["gleam", "json"])
-    surreal_type.Identifier(_) ->
-      module.identifier.create(name)
-      |> module.binop.pipe(module.binop.access(
-        module.identifier.create("identifier"),
-        module.identifier.create("to_string"),
-      ))
-      |> module.binop.pipe(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("string"),
-      ))
-      |> module.add_import(["gleam", "json"])
-      |> module.add_import(["surreal", "identifier"])
-    surreal_type.Record(inner) ->
-      module.identifier.create(name)
-      |> module.binop.pipe(
-        module.function_call.create(module.binop.access(
-          module.identifier.create("record"),
-          module.identifier.create("to_json"),
-        ))
-        |> module.function_call.add(module.binop.access(
-          module.identifier.create(
-            string.split(inner, ".") |> list.first() |> result.unwrap(inner),
-          ),
-          module.identifier.create("to_json"),
-        )),
-      )
-      |> module.add_import(["surreal", "record"])
-    surreal_type.Point ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("point"),
-        module.identifier.create("to_json"),
-      ))
-      |> module.function_call.add(module.identifier.create(name))
-      |> module.add_import(["surreal", "point"])
-    surreal_type.Bool ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("bool"),
-      ))
-      |> module.function_call.add(module.identifier.create(name))
-      |> module.add_import(["gleam", "json"])
-    surreal_type.Option(inner) ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("nullable"),
-      ))
-      |> module.function_call.add(module.identifier.create(name))
-      |> module.function_call.add(
-        module.function_definition.create()
-        |> module.function_definition.add_untyped_parameter("value")
-        |> module.function_definition.add(generate_to_json_for_type(
-          "value",
-          inner,
-        )),
-      )
-      |> module.add_import(["gleam", "json"])
-    surreal_type.Array(inner) ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("array"),
-      ))
-      |> module.function_call.add(module.identifier.create(name))
-      |> module.function_call.add(
-        module.function_definition.create()
-        |> module.function_definition.add_untyped_parameter("value")
-        |> module.function_definition.add(generate_to_json_for_type(
-          "value",
-          inner,
-        )),
-      )
-      |> module.add_import(["gleam", "json"])
-    surreal_type.Object ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json_value"),
-        module.identifier.create("to_json"),
-      ))
-      |> module.function_call.add(module.identifier.create(name))
-      |> module.add_import(["json_value"])
-    surreal_type.None ->
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json"),
-        module.identifier.create("null"),
-      ))
-      |> module.add_import(["gleam", "json"])
+    surreal_type.Int -> generate_int_to_json(name)
+    surreal_type.Float -> generate_float_to_json(name)
+    surreal_type.String -> generate_string_to_json(name)
+    surreal_type.Bool -> generate_bool_to_json(name)
+    surreal_type.Identifier(_) -> generate_identifier_to_json(name)
+    surreal_type.Record(inner) -> generate_record_to_json(name, inner)
+    surreal_type.Datetime -> generate_datetime_to_json(name)
+    surreal_type.Point -> generate_point_to_json(name)
+    surreal_type.Option(inner) -> generate_option_to_json(name, inner)
+    surreal_type.Array(inner) -> generate_array_to_json(name, inner)
+    surreal_type.Object -> generate_object_to_json(name)
+    surreal_type.None -> generate_none_to_json()
   }
 }
 
@@ -326,9 +354,9 @@ fn generate_type_to_json(
   |> module.add_import(["gleam", "json"])
 }
 
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 //                                        Enum Definition                                        //
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 
 fn generate_enum_definition(
   name: String,
@@ -344,9 +372,9 @@ fn generate_enum_definition(
   })
 }
 
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 //                                       Enum `to_string`                                        //
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 
 fn generate_enum_to_string(
   name: String,
@@ -358,7 +386,7 @@ fn generate_enum_to_string(
   |> module.function_definition.add_aliased_parameter(
     "value",
     "value",
-    module.identifier.create(common.string_to_pascal_case(name)),
+    module_common.type_identifier(name),
   )
   |> module.function_definition.with_return_type(module.types.string())
   |> module.function_definition.add(
@@ -375,11 +403,22 @@ fn generate_enum_to_string(
   )
 }
 
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 //                                        Enum `decoder`                                         //
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 
 fn generate_enum_to_decoder(
+  config: common.Configuration,
+  name: String,
+  values: List(String),
+) -> module.Module {
+  case config.backstage {
+    True -> generate_enum_to_backstage_serializer(name, values)
+    False -> generate_enum_to_gleam_decoder(name, values)
+  }
+}
+
+fn generate_enum_to_gleam_decoder(
   name: String,
   values: List(String),
 ) -> module.Module {
@@ -389,80 +428,64 @@ fn generate_enum_to_decoder(
   |> module.function_definition.with_name(name <> "_decoder")
   |> module.function_definition.public()
   |> module.function_definition.with_return_type(
-    module.function_call.create(module.binop.create(
-      module.identifier.create("decode"),
-      module.Access,
-      module.identifier.create("Decoder"),
-    ))
-    |> module.function_call.add(
-      module.identifier.create(common.string_to_pascal_case(name)),
-    )
-    |> module.add_import(["gleam", "dynamic", "decode"]),
+    decode_module.decoder_of(module_common.type_identifier(name)),
   )
   |> module.function_definition.add(
-    module.use_expression.create(
-      module.function_call.create(module.binop.create(
-        module.identifier.create("decode"),
-        module.Access,
-        module.identifier.create("then"),
-      ))
-      |> module.function_call.add(module.binop.create(
-        module.identifier.create("decode"),
-        module.Access,
-        module.identifier.create("string"),
-      ))
-      |> module.add_import(["gleam", "dynamic", "decode"]),
-    )
+    decode_module.string()
+    |> decode_module.then()
+    |> module.use_expression.create()
     |> module.use_expression.add("value"),
   )
   |> module.function_definition.add(
     module.case_expression.create(module.identifier.create("value"))
     |> list.fold(values, _, fn(module, value) {
-      module.case_expression.add(
-        module,
+      module
+      |> module.case_expression.add(
         module.case_branch.create(module.literal.string(value))
-          |> module.case_branch.add(
-            module.function_call.create(module.binop.create(
-              module.identifier.create("decode"),
-              module.Access,
-              module.identifier.create("success"),
-            ))
-            |> module.function_call.add(
-              module.identifier.create(common.string_to_pascal_case(value)),
-            )
-            |> module.add_import(["gleam", "dynamic", "decode"]),
-          ),
+        |> module.case_branch.add(
+          decode_module.success_of(module_common.type_identifier(value)),
+        ),
       )
     })
     |> module.case_expression.add(
       module.case_branch.create_default()
-      |> module.case_branch.add(
-        module.function_call.create(module.binop.create(
-          module.identifier.create("decode"),
-          module.Access,
-          module.identifier.create("failure"),
-        ))
-        |> module.function_call.add(
-          module.identifier.create(common.string_to_pascal_case(first)),
-        )
-        |> module.function_call.add(module.binop.create(
-          module.literal.string("Unknown value: "),
-          module.StringConcat,
+      |> module.case_branch.add(decode_module.failure_of(
+        module_common.type_identifier(first),
+        module.binop.string_concat(
+          module.literal.string("Unknown value "),
           module.identifier.create("value"),
-        ))
-        |> module.add_import(["gleam", "dynamic", "decode"]),
-      ),
+        ),
+      )),
     ),
   )
+  |> module.add_import(["gleam", "dynamic", "decode"])
 }
 
-//-----------------------------------------------------------------------------------------------//
+fn generate_enum_to_backstage_serializer(
+  name: String,
+  values: List(String),
+) -> module.Module {
+  module.function_definition.create()
+  |> module.function_definition.with_name(name <> "_serializer")
+  |> module.function_definition.public()
+  |> module.function_definition.with_return_type(
+    backstage_serialize_module.serializer_of(module_common.type_identifier(name)),
+  )
+  |> module.function_definition.add(backstage_serialize_module.string_enum_of(
+    values
+      |> list.map(module_common.type_identifier)
+      |> module.literal.list(),
+    module.identifier.create(name <> "_to_string"),
+  ))
+}
+
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 //                                     Table Type `to_surql`                                     //
-//-----------------------------------------------------------------------------------------------//
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 
 fn generate_to_surql_for_type(
   name: String,
-  type_: surreal_type.SurrealType,
+  type_: SurrealType,
 ) -> module.Module {
   case type_ {
     surreal_type.Datetime ->
@@ -472,11 +495,17 @@ fn generate_to_surql_for_type(
       ))
       |> module.function_call.add(
         module.function_call.create(module.binop.access(
-          module.identifier.create("birl"),
-          module.identifier.create("to_iso8601"),
+          module.identifier.create("timestamp"),
+          module.identifier.create("to_rfc3339"),
         ))
-        |> module.function_call.add(module.identifier.create(name)),
+        |> module.function_call.add(module.identifier.create(name))
+        |> module.function_call.add(module.binop.access(
+          module.identifier.create("calendar"),
+          module.identifier.create("utc_offset"),
+        )),
       )
+      |> module.add_import(["gleam", "time", "timestamp"])
+      |> module.add_import(["gleam", "time", "calendar"])
     surreal_type.Int ->
       module.function_call.create(module.binop.access(
         module.identifier.create("surreal_ql"),
@@ -675,192 +704,457 @@ fn generate_type_to_surql(
   |> module.add_import(["surreal_ql"])
 }
 
-fn decoder_of(type_: surreal_type.SurrealType) -> module.Module {
-  case type_ {
-    surreal_type.Datetime -> {
-      module.function_call.create(module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("then"),
-      ))
-      |> module.function_call.add(module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("string"),
-      ))
-      |> module.function_call.add(
-        module.function_definition.create()
-        |> module.function_definition.add_untyped_parameter("str")
-        |> module.function_definition.add(
-          module.case_expression.create(
-            module.function_call.create(module.binop.access(
-              module.identifier.create("birl"),
-              module.identifier.create("parse"),
-            ))
-            |> module.function_call.add(module.identifier.create("str")),
-          )
-          |> module.case_expression.add(
-            module.case_branch.create(
-              module.function_call.create(module.identifier.create("Ok"))
-              |> module.function_call.add(module.identifier.create("time")),
-            )
-            |> module.case_branch.add(
-              module.function_call.create(module.binop.access(
-                module.identifier.create("decode"),
-                module.identifier.create("success"),
-              ))
-              |> module.function_call.add(module.identifier.create("time")),
-            ),
-          )
-          |> module.case_expression.add(
-            module.case_branch.create(
-              module.function_call.create(module.identifier.create("Error"))
-              |> module.function_call.add(module.identifier.discard),
-            )
-            |> module.case_branch.add(
-              module.function_call.create(module.binop.access(
-                module.identifier.create("decode"),
-                module.identifier.create("failure"),
-              ))
-              |> module.function_call.add(
-                module.function_call.create(module.binop.access(
-                  module.identifier.create("birl"),
-                  module.identifier.create("unix_epoch"),
-                )),
-              )
-              |> module.function_call.add(module.binop.string_concat(
-                module.literal.string("Failed to parse datetime: "),
-                module.identifier.create("str"),
-              )),
-            ),
-          ),
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+//                                         Type Decoder                                          //
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+
+fn decoder_of_datetime(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_datetime()
+    False -> gleam_decoder_of_datetime()
+  }
+}
+
+fn backstage_serializer_of_datetime() -> module.Module {
+  backstage_serialize_module.timestamp()
+}
+
+fn gleam_decoder_of_datetime() -> module.Module {
+  decode_module.then(decode_module.string())
+  |> module.function_call.add(
+    module.function_definition.create()
+    |> module.function_definition.add_untyped_parameter("str")
+    |> module.function_definition.add(
+      module.case_expression.create(
+        module.function_call.create(module.binop.access(
+          module.identifier.create("timestamp"),
+          module.identifier.create("parse_rfc3339"),
+        ))
+        |> module.function_call.add(module.identifier.create("str")),
+      )
+      |> module.case_expression.add(
+        module.case_branch.create(
+          module.function_call.create(module.identifier.create("Ok"))
+          |> module.function_call.add(module.identifier.create("time")),
+        )
+        |> module.case_branch.add(
+          decode_module.success_of(module.identifier.create("time")),
         ),
       )
-      |> module.add_import(["gleam", "dynamic", "decode"])
-      |> module.add_import(["birl"])
-    }
+      |> module.case_expression.add(
+        module.case_branch.create(
+          module.function_call.create(module.identifier.create("Error"))
+          |> module.function_call.add(module.identifier.discard),
+        )
+        |> module.case_branch.add(decode_module.failure_of(
+          module.binop.access(
+            module.identifier.create("timestamp"),
+            module.identifier.create("unix_epoch"),
+          ),
+          module.binop.string_concat(
+            module.literal.string("Failed to parse datetime: "),
+            module.identifier.create("str"),
+          ),
+        )),
+      ),
+    ),
+  )
+  |> module.add_import(["gleam", "dynamic", "decode"])
+  |> module.add_import(["gleam", "time", "timestamp"])
+}
 
-    surreal_type.Int -> {
-      module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("int"),
-      )
-      |> module.add_import(["gleam", "dynamic", "decode"])
-    }
-    surreal_type.Float -> {
-      module.function_call.create(module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("one_of"),
-      ))
-      |> module.function_call.add(module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("float"),
-      ))
-      |> module.function_call.add(
-        module.literal.list([
-          module.binop.pipe(
-            module.binop.access(
-              module.identifier.create("decode"),
-              module.identifier.create("int"),
-            ),
-            module.function_call.create(module.binop.access(
-              module.identifier.create("decode"),
-              module.identifier.create("map"),
-            ))
-              |> module.function_call.add(module.binop.access(
-                module.identifier.create("int"),
-                module.identifier.create("to_float"),
-              )),
-          ),
-        ]),
-      )
-      |> module.add_import(["gleam", "dynamic", "decode"])
-      |> module.add_import(["gleam", "int"])
-    }
-    surreal_type.String -> {
-      module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("string"),
-      )
-      |> module.add_import(["gleam", "dynamic", "decode"])
-    }
-    surreal_type.Identifier(_) -> {
-      module.function_call.create(module.binop.access(
-        module.identifier.create("identifier"),
-        module.identifier.create("decoder"),
-      ))
-      |> module.add_import(["surreal", "identifier"])
-    }
-    surreal_type.Record(inner) -> {
-      module.function_call.create(module.binop.access(
-        module.identifier.create("record"),
-        module.identifier.create("decoder"),
-      ))
-      |> module.function_call.add(
-        module.function_call.create(module.binop.access(
-          module.identifier.create(
-            string.split(inner, ".") |> list.first() |> result.unwrap(inner),
-          ),
-          module.identifier.create("decoder"),
-        )),
-      )
-      |> module.function_call.add(
-        module.function_definition.create()
-        |> module.function_definition.add_untyped_parameter("data")
-        |> module.function_definition.add(module.binop.access(
-          module.identifier.create("data"),
-          module.identifier.create("id"),
-        )),
-      )
-      |> module.add_import(["surreal", "record"])
-    }
-    surreal_type.Bool -> {
-      module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("bool"),
-      )
-      |> module.add_import(["gleam", "dynamic", "decode"])
-    }
-    surreal_type.Point -> {
-      module.function_call.create(module.binop.access(
-        module.identifier.create("point"),
-        module.identifier.create("decoder"),
-      ))
-      |> module.add_import(["surreal", "point"])
-    }
-    surreal_type.Object -> {
-      module.function_call.create(module.binop.access(
-        module.identifier.create("json_value"),
-        module.identifier.create("decoder"),
-      ))
-      |> module.add_import(["json_value"])
-    }
-    surreal_type.Option(inner) -> {
-      module.function_call.create(module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("optional"),
-      ))
-      |> module.function_call.add(decoder_of(inner))
-      |> module.add_import(["gleam", "dynamic", "decode"])
-    }
-    surreal_type.Array(inner) -> {
-      module.function_call.create(module.binop.access(
-        module.identifier.create("decode"),
-        module.identifier.create("list"),
-      ))
-      |> module.function_call.add(decoder_of(inner))
-      |> module.add_import(["gleam", "dynamic", "decode"])
-    }
-    surreal_type.None ->
-      module.function_call.create(
+fn decoder_of_int(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_int()
+    False -> gleam_decoder_of_int()
+  }
+}
+
+fn backstage_serializer_of_int() -> module.Module {
+  backstage_serialize_module.int()
+}
+
+fn gleam_decoder_of_int() -> module.Module {
+  module.binop.access(
+    module.identifier.create("decode"),
+    module.identifier.create("int"),
+  )
+  |> module.add_import(["gleam", "dynamic", "decode"])
+}
+
+fn decoder_of_float(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_float()
+    False -> gleam_decoder_of_float()
+  }
+}
+
+fn backstage_serializer_of_float() -> module.Module {
+  backstage_serialize_module.float()
+}
+
+fn gleam_decoder_of_float() -> module.Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("decode"),
+    module.identifier.create("one_of"),
+  ))
+  |> module.function_call.add(module.binop.access(
+    module.identifier.create("decode"),
+    module.identifier.create("float"),
+  ))
+  |> module.function_call.add(
+    module.literal.list([
+      module.binop.pipe(
         module.binop.access(
           module.identifier.create("decode"),
-          module.identifier.create("success"),
-        )
-        |> module.function_call.add(module.identifier.create("Nil")),
-      )
+          module.identifier.create("int"),
+        ),
+        module.function_call.create(module.binop.access(
+          module.identifier.create("decode"),
+          module.identifier.create("map"),
+        ))
+          |> module.function_call.add(module.binop.access(
+            module.identifier.create("int"),
+            module.identifier.create("to_float"),
+          )),
+      ),
+    ]),
+  )
+  |> module.add_import(["gleam", "dynamic", "decode"])
+  |> module.add_import(["gleam", "int"])
+}
+
+fn decoder_of_string(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_string()
+    False -> gleam_decoder_of_string()
+  }
+}
+
+fn backstage_serializer_of_string() -> module.Module {
+  backstage_serialize_module.string()
+}
+
+fn gleam_decoder_of_string() -> module.Module {
+  module.binop.access(
+    module.identifier.create("decode"),
+    module.identifier.create("string"),
+  )
+  |> module.add_import(["gleam", "dynamic", "decode"])
+}
+
+fn decoder_of_identifier(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_identifier()
+    False -> gleam_decoder_of_identifier()
+  }
+}
+
+fn backstage_serializer_of_identifier() -> module.Module {
+  backstage_serialize_module.identifier()
+}
+
+fn gleam_decoder_of_identifier() -> module.Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("identifier"),
+    module.identifier.create("decoder"),
+  ))
+  |> module.add_import(["surreal", "identifier"])
+}
+
+fn decoder_of_record(
+  config: common.Configuration,
+  inner: String,
+) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_record(inner)
+    False -> gleam_decoder_of_record(inner)
+  }
+}
+
+fn backstage_serializer_of_record(inner: String) -> module.Module {
+  backstage_serialize_module.record_of(
+    module.function_call.create(module.binop.access(
+      module.identifier.create(
+        string.split(inner, ".") |> list.first() |> result.unwrap(inner),
+      ),
+      module.identifier.create("serializer"),
+    )),
+    module.function_definition.create()
+      |> module.function_definition.add_untyped_parameter("data")
+      |> module.function_definition.add(module.binop.access(
+        module.identifier.create("data"),
+        module.identifier.create("id"),
+      )),
+  )
+}
+
+fn gleam_decoder_of_record(inner: String) -> module.Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("record"),
+    module.identifier.create("decoder"),
+  ))
+  |> module.function_call.add(
+    module.function_call.create(module.binop.access(
+      module.identifier.create(
+        string.split(inner, ".") |> list.first() |> result.unwrap(inner),
+      ),
+      module.identifier.create("decoder"),
+    )),
+  )
+  |> module.function_call.add(
+    module.function_definition.create()
+    |> module.function_definition.add_untyped_parameter("data")
+    |> module.function_definition.add(module.binop.access(
+      module.identifier.create("data"),
+      module.identifier.create("id"),
+    )),
+  )
+  |> module.add_import(["surreal", "record"])
+}
+
+fn decoder_of_bool(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_bool()
+    False -> gleam_decoder_of_bool()
+  }
+}
+
+fn backstage_serializer_of_bool() -> module.Module {
+  backstage_serialize_module.bool()
+}
+
+fn gleam_decoder_of_bool() -> module.Module {
+  module.binop.access(
+    module.identifier.create("decode"),
+    module.identifier.create("bool"),
+  )
+  |> module.add_import(["gleam", "dynamic", "decode"])
+}
+
+fn decoder_of_point(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_point()
+    False -> gleam_decoder_of_point()
+  }
+}
+
+fn backstage_serializer_of_point() -> module.Module {
+  backstage_serialize_module.point()
+}
+
+fn gleam_decoder_of_point() -> module.Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("point"),
+    module.identifier.create("decoder"),
+  ))
+  |> module.add_import(["surreal", "point"])
+}
+
+fn decoder_of_object(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_object()
+    False -> gleam_decoder_of_object()
+  }
+}
+
+fn backstage_serializer_of_object() -> module.Module {
+  backstage_serialize_module.json_value()
+}
+
+fn gleam_decoder_of_object() -> module.Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("json_value"),
+    module.identifier.create("decoder"),
+  ))
+  |> module.add_import(["json_value"])
+}
+
+fn decoder_of_option(
+  config: common.Configuration,
+  inner: SurrealType,
+) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_option(config, inner)
+    False -> gleam_decoder_of_option(config, inner)
+  }
+}
+
+fn backstage_serializer_of_option(
+  config: common.Configuration,
+  inner: SurrealType,
+) -> module.Module {
+  backstage_serialize_module.optional_of(decoder_of(config, inner))
+}
+
+fn gleam_decoder_of_option(
+  config: common.Configuration,
+  inner: SurrealType,
+) -> module.Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("decode"),
+    module.identifier.create("optional"),
+  ))
+  |> module.function_call.add(decoder_of(config, inner))
+  |> module.add_import(["gleam", "dynamic", "decode"])
+}
+
+fn decoder_of_array(
+  config: common.Configuration,
+  inner: SurrealType,
+) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_array(config, inner)
+    False -> gleam_decoder_of_array(config, inner)
+  }
+}
+
+fn backstage_serializer_of_array(
+  config: common.Configuration,
+  inner: SurrealType,
+) -> module.Module {
+  backstage_serialize_module.list_of(decoder_of(config, inner))
+}
+
+fn gleam_decoder_of_array(
+  config: common.Configuration,
+  inner: SurrealType,
+) -> module.Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("decode"),
+    module.identifier.create("list"),
+  ))
+  |> module.function_call.add(decoder_of(config, inner))
+  |> module.add_import(["gleam", "dynamic", "decode"])
+}
+
+fn decoder_of_none(config: common.Configuration) -> module.Module {
+  case config.backstage {
+    True -> backstage_serializer_of_none()
+    False -> gleam_decoder_of_none()
+  }
+}
+
+fn backstage_serializer_of_none() -> module.Module {
+  backstage_serialize_module.nil()
+}
+
+fn gleam_decoder_of_none() -> module.Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("decode"),
+    module.identifier.create("success"),
+  ))
+  |> module.function_call.add(module.literal.nil)
+  |> module.add_import(["gleam", "dynamic", "decode"])
+}
+
+fn decoder_of(
+  config: common.Configuration,
+  type_: SurrealType,
+) -> module.Module {
+  case type_ {
+    surreal_type.Datetime -> decoder_of_datetime(config)
+    surreal_type.Int -> decoder_of_int(config)
+    surreal_type.Float -> decoder_of_float(config)
+    surreal_type.String -> decoder_of_string(config)
+    surreal_type.Identifier(_) -> decoder_of_identifier(config)
+    surreal_type.Record(inner) -> decoder_of_record(config, inner)
+    surreal_type.Bool -> decoder_of_bool(config)
+    surreal_type.Point -> decoder_of_point(config)
+    surreal_type.Object -> decoder_of_object(config)
+    surreal_type.Option(inner) -> decoder_of_option(config, inner)
+    surreal_type.Array(inner) -> decoder_of_array(config, inner)
+    surreal_type.None -> decoder_of_none(config)
   }
 }
 
 fn generate_type_decoder(
+  config: common.Configuration,
+  name: String,
+  fields: List(extractor.TableField),
+  prefix: String,
+) -> module.Module {
+  case config.backstage {
+    True -> backstage_generate_type_serializer(config, name, fields, prefix)
+    False -> gleam_generate_type_decoder(config, name, fields, prefix)
+  }
+}
+
+fn backstage_generate_type_serializer(
+  config: common.Configuration,
+  name: String,
+  fields: List(extractor.TableField),
+  prefix: String,
+) -> module.Module {
+  module.function_definition.create()
+  |> module.function_definition.with_name(prefix <> "serializer")
+  |> module.function_definition.public()
+  |> module.function_definition.with_return_type(
+    backstage_serialize_module.serializer_of(module_common.type_identifier(name)),
+  )
+  |> module.function_definition.add(backstage_serialize_module.object_of(
+    list.map(fields, fn(field) {
+      module.use_expression.create(backstage_serialize_module.field_of(
+        module.identifier.create("context"),
+        module.literal.string(field.name),
+        case field.linked_enum, field.object_fields, field.type_ {
+          option.Some(enum), _, surreal_type.Option(_) -> {
+            backstage_serialize_module.optional_of(
+              module.function_call.create(module.identifier.create(
+                enum <> "_serializer",
+              )),
+            )
+          }
+          option.Some(enum), _, _ ->
+            module.function_call.create(module.identifier.create(
+              enum <> "_serializer",
+            ))
+          _, [_, ..], surreal_type.Object ->
+            module.function_call.create(module.identifier.create(
+              field.name <> "_serializer",
+            ))
+          _, [_, ..], surreal_type.Array(surreal_type.Object) -> {
+            backstage_serialize_module.list_of(
+              module.function_call.create(module.identifier.create(
+                field.name <> "_serializer",
+              )),
+            )
+          }
+          _, _, _ -> decoder_of(config, field.type_)
+        },
+        module.function_definition.create()
+          |> module.function_definition.add_parameter(
+            "data",
+            module_common.type_identifier(name),
+          )
+          |> module.function_definition.add(module.binop.access(
+            module.identifier.create("data"),
+            module.identifier.create(field.name),
+          )),
+      ))
+      |> module.use_expression.add("context")
+      |> module.use_expression.add(field.name)
+    })
+    |> list.append([
+      backstage_serialize_module.build_of(
+        module.identifier.create("context"),
+        module_common.type_identifier(name)
+          |> module.function_call.create()
+          |> list.fold(fields, _, fn(module, field) {
+            module.function_call.add_with_alias(
+              module,
+              field.name,
+              module.identifier.create(field.name),
+            )
+          }),
+      ),
+    ]),
+  ))
+  |> module.add_import(["dynamic", "serialize"])
+}
+
+fn gleam_generate_type_decoder(
+  config: common.Configuration,
   name: String,
   fields: List(extractor.TableField),
   prefix: String,
@@ -931,7 +1225,7 @@ fn generate_type_decoder(
               )),
             )
           }
-          _, _, _ -> decoder_of(field.type_)
+          _, _, _ -> decoder_of(config, field.type_)
         },
       ),
     )
@@ -956,17 +1250,20 @@ fn generate_type_decoder(
   |> module.add_import(["gleam", "dynamic", "decode"])
 }
 
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+//                                         Dependencies                                          //
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+
 fn retrieve_dependencies_(
   fields: List(extractor.TableField),
   tables: dict.Dict(String, extractor.TableInfo),
 ) -> set.Set(String) {
   list.fold(fields, set.new(), fn(acc, field) {
     let acc = case field.type_ {
-      surreal_type.Datetime -> set.insert(acc, "birl")
+      surreal_type.Datetime -> acc
       surreal_type.Option(surreal_type.Datetime) ->
         acc
         |> set.insert("gleam/option")
-        |> set.insert("birl")
       surreal_type.Identifier(name) ->
         set.insert(acc, "surreal/identifier")
         |> case
@@ -990,7 +1287,7 @@ fn retrieve_dependencies_(
           _ -> function.identity
         }
       surreal_type.Option(_) -> set.insert(acc, "gleam/option")
-      surreal_type.Object -> set.insert(acc, "json_value")
+      surreal_type.Object -> acc
       surreal_type.Point -> set.insert(acc, "surreal/point")
       _ -> acc
     }
@@ -1009,11 +1306,12 @@ fn retrieve_dependencies(
 ) -> module.Module {
   list.fold(fields, module, fn(module, field) {
     let module = case field.type_ {
-      surreal_type.Datetime -> module.add_import(module, ["birl"])
+      surreal_type.Datetime ->
+        module.add_import(module, ["gleam", "time", "timestamp"])
       surreal_type.Option(surreal_type.Datetime) ->
         module
         |> module.add_import(["gleam", "option"])
-        |> module.add_import(["birl"])
+        |> module.add_import(["gleam", "time", "timestamp"])
       surreal_type.Identifier(name) ->
         module
         |> module.add_import(["surreal", "identifier"])
@@ -1065,13 +1363,13 @@ fn resolve_dependencies(
 
     let #(module, fields) = case field.type_ {
       surreal_type.Datetime -> #(
-        module.add_import(module, ["birl"]),
+        module.add_import(module, ["gleam", "time", "timestamp"]),
         list.append(fields, [field]),
       )
       surreal_type.Option(surreal_type.Datetime) -> #(
         module
           |> module.add_import(["gleam", "option"])
-          |> module.add_import(["birl"]),
+          |> module.add_import(["gleam", "time", "timestamp"]),
         list.append(fields, [field]),
       )
       surreal_type.Identifier(_) -> #(
@@ -1319,6 +1617,7 @@ fn add_dependencies(
 }
 
 fn generate_nest_field(
+  config: common.Configuration,
   field: extractor.TableField,
 ) -> Result(module.Module, Nil) {
   case field.object_fields {
@@ -1328,13 +1627,14 @@ fn generate_nest_field(
       let module =
         module.root.create()
         |> list.fold(
-          fields |> list.filter_map(generate_nest_field),
+          fields |> list.filter_map(generate_nest_field(config, _)),
           _,
           module.root.add,
         )
         |> module.root.add(module.section_comment(name))
         |> module.root.add(generate_type_definition(field.name, fields))
         |> module.root.add(generate_type_decoder(
+          config,
           field.name,
           fields,
           field.name <> "_",
@@ -1659,7 +1959,7 @@ fn resolve_table_fields(
 pub type ParameterProperty {
   ParameterProperty(
     name: String,
-    type_: surreal_type.SurrealType,
+    type_: SurrealType,
     linked_enum: option.Option(String),
     dependencies: List(String),
   )
@@ -1680,7 +1980,7 @@ fn pick_field(
 
 fn extract_parameters(
   node: node.Node,
-  expected_type: Result(surreal_type.SurrealType, Nil),
+  expected_type: Result(SurrealType, Nil),
   table_info: extractor.TableInfo,
   tables: dict.Dict(String, extractor.TableInfo),
   namespace: String,
@@ -1853,13 +2153,97 @@ fn complete_parameter_extraction(
   })
 }
 
-fn generate_table_specs(name: String) -> module.Module {
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+//                                          Table Spec                                           //
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+
+fn generate_table_specs(
+  config: common.Configuration,
+  name: String,
+) -> module.Module {
+  case config.backstage {
+    True -> generate_backstage_table_specs(name)
+    False -> generate_gleam_table_specs(name)
+  }
+}
+
+fn generate_gleam_table_specs(name: String) -> module.Module {
   module.function_definition.create()
   |> module.function_definition.public()
   |> module.function_definition.with_name("specs")
   |> module.function_definition.with_return_type(
     module.function_call.create(module.binop.access(
       module.identifier.create("table_spec"),
+      module.identifier.create("GleamTableSpec"),
+    ))
+    |> module.function_call.add(
+      module.identifier.create(common.string_to_pascal_case(name)),
+    ),
+  )
+  |> module.function_definition.add(
+    module.function_call.create(module.binop.access(
+      module.identifier.create("table_spec"),
+      module.identifier.create("TableSpec"),
+    ))
+    |> module.function_call.add_with_alias(
+      "table_name",
+      module.identifier.create("table_name"),
+    )
+    |> module.function_call.add_with_alias(
+      "query_string",
+      module.identifier.create("query_string"),
+    )
+    |> module.function_call.add_with_alias(
+      "query",
+      module.identifier.create("query"),
+    )
+    |> module.function_call.add_with_alias(
+      "id",
+      module.function_definition.create()
+        |> module.function_definition.add_parameter(
+          "value",
+          module.identifier.create(common.string_to_pascal_case(name)),
+        )
+        |> module.function_definition.add(
+          module.function_call.create(module.binop.access(
+            module.identifier.create("identifier"),
+            module.identifier.create("Identifier"),
+          ))
+          |> module.function_call.add(
+            module.identifier.create("value")
+            |> module.binop.access(module.identifier.create("id"))
+            |> module.binop.access(module.identifier.create("type_")),
+          )
+          |> module.function_call.add(
+            module.identifier.create("value")
+            |> module.binop.access(module.identifier.create("id"))
+            |> module.binop.access(module.identifier.create("id")),
+          ),
+        ),
+    )
+    |> module.function_call.add_with_alias(
+      "to_surql",
+      module.identifier.create("to_surql"),
+    )
+    |> module.function_call.add_with_alias(
+      "to_json",
+      module.identifier.create("to_json"),
+    )
+    |> module.function_call.add_with_alias(
+      "serializer",
+      module.identifier.create("decoder"),
+    ),
+  )
+  |> module.add_import(["surreal", "table_spec"])
+}
+
+fn generate_backstage_table_specs(name: String) -> module.Module {
+  module.function_definition.create()
+  |> module.function_definition.public()
+  |> module.function_definition.with_name("specs")
+  |> module.function_definition.with_return_type(
+    module.function_call.create(module.binop.access(
+      module.identifier.create("bs_table_spec"),
       module.identifier.create("TableSpec"),
     ))
     |> module.function_call.add(
@@ -1916,12 +2300,20 @@ fn generate_table_specs(name: String) -> module.Module {
       module.identifier.create("to_json"),
     )
     |> module.function_call.add_with_alias(
-      "decoder",
-      module.identifier.create("decoder"),
+      "serializer",
+      module.identifier.create("serializer"),
     ),
+  )
+  |> module.add_aliased_import(
+    ["backstage_surreal", "table_spec"],
+    "bs_table_spec",
   )
   |> module.add_import(["surreal", "table_spec"])
 }
+
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
+//                                          Parameters                                           //
+// ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 
 fn generate_parameters_builder(
   parameters: List(ParameterProperty),
@@ -1966,9 +2358,11 @@ fn generate_parameters_builder(
       }),
     ),
   )
+  |> module.add_import(["surreal_ql"])
 }
 
 fn do_define_normal_table_node(
+  config: common.Configuration,
   node: node.Node,
   tables: dict.Dict(String, extractor.TableInfo),
 ) -> Result(module.Module, String) {
@@ -1982,7 +2376,7 @@ fn do_define_normal_table_node(
     module.root.create()
     |> list.fold(
       info.fields
-        |> list.filter_map(generate_nest_field),
+        |> list.filter_map(generate_nest_field(config, _)),
       _,
       module.root.add,
     )
@@ -1995,7 +2389,7 @@ fn do_define_normal_table_node(
       module
       |> module.root.add(generate_enum_definition(enum_name, values))
       |> module.root.add(generate_enum_to_string(enum_name, values))
-      |> module.root.add(generate_enum_to_decoder(enum_name, values))
+      |> module.root.add(generate_enum_to_decoder(config, enum_name, values))
     })
 
   let #(module, fields) = resolve_dependencies(module, info.fields, tables)
@@ -2006,17 +2400,10 @@ fn do_define_normal_table_node(
       module.section_comment(common.string_to_space_case(name)),
     )
     |> module.root.add(generate_type_definition(name, fields))
-    |> module.root.add(generate_type_decoder(name, fields, ""))
+    |> module.root.add(generate_type_decoder(config, name, fields, ""))
     |> module.root.add(generate_type_to_json(name, fields, ""))
     |> module.root.add(generate_type_to_surql(name, fields, ""))
-    |> module.root.add(generate_table_specs(name))
-
-  // TODO: Move imports for the node 
-  let module =
-    module
-    |> module.add_import(["gleam", "option"])
-    |> module.add_import(["surreal", "node"])
-    |> module.add_import(["surreal_type"])
+    |> module.root.add(generate_table_specs(config, name))
 
   let module = case as_, list.find(info.fields, fn(f) { f.name == "id" }) {
     option.Some(_),
@@ -2047,6 +2434,7 @@ fn do_define_normal_table_node(
 }
 
 fn do_define_relation_table_node(
+  config: common.Configuration,
   node: node.Node,
   tables: dict.Dict(String, extractor.TableInfo),
 ) -> Result(module.Module, String) {
@@ -2073,7 +2461,7 @@ fn do_define_relation_table_node(
       module
       |> module.root.add(generate_enum_definition(enum_name, values))
       |> module.root.add(generate_enum_to_string(enum_name, values))
-      |> module.root.add(generate_enum_to_decoder(enum_name, values))
+      |> module.root.add(generate_enum_to_decoder(config, enum_name, values))
     })
 
   let #(module, fields) = resolve_dependencies(module, info.fields, tables)
@@ -2085,566 +2473,478 @@ fn do_define_relation_table_node(
       module.section_comment(common.string_to_space_case(name)),
     )
     |> module.root.add(generate_type_definition(name, fields))
-    |> module.root.add(generate_type_decoder(name, fields, ""))
+    |> module.root.add(generate_type_decoder(config, name, fields, ""))
     |> module.root.add(generate_type_to_json(name, fields, ""))
     |> module.root.add(generate_type_to_surql(name, fields, ""))
-    |> module.root.add(generate_table_specs(name))
-
-  // TODO: Move imports for the node 
-  let module =
-    module
-    |> module.add_import(["gleam", "option"])
-    |> module.add_import(["surreal", "node"])
-    |> module.add_import(["surreal_type"])
+    |> module.root.add(generate_table_specs(config, name))
 
   Ok(module)
 }
 
-fn do_node(
+fn do_select_node(
+  config: common.Configuration,
   node: node.Node,
   tables: dict.Dict(String, extractor.TableInfo),
-) -> Result(option.Option(String), String) {
-  case node {
-    node.DefineNormalTable(..) -> {
-      do_define_normal_table_node(node, tables)
-      |> result.map(fn(module) {
-        option.Some(module.to_string2(module) <> "\n\n")
-      })
+) -> Result(module.Module, String) {
+  let assert node.Select(fields:, table:, where:, limit:, ..) = node
+  use table_info <- result.try(
+    dict.get(tables, table)
+    |> result.replace_error("Unknown table for select: " <> table),
+  )
+
+  let path =
+    result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
+  let path = string.split(path, "/")
+  let namespace = list.last(path) |> result.unwrap("")
+
+  let module = case fields {
+    [node.SelectField(field: node.All, ..)] -> {
+      let module =
+        module.root.create()
+        |> module.root.add(module.section_comment("Query result"))
+        |> module.root.add(
+          module.const_definition.create(
+            "QueryResult",
+            module.binop.access(
+              module.identifier.create(namespace),
+              module.identifier.create(common.string_to_pascal_case(table)),
+            ),
+          )
+          |> module.const_definition.public()
+          |> module.const_definition.as_type(),
+        )
+        |> module.root.add(
+          module.const_definition.create(
+            "to_json",
+            module.binop.access(
+              module.identifier.create(namespace),
+              module.identifier.create("to_json"),
+            ),
+          )
+          |> module.const_definition.public(),
+        )
+
+      let module = case config.backstage {
+        True ->
+          module
+          |> module.root.add(
+            module.const_definition.create(
+              "serializer",
+              module.binop.access(
+                module.identifier.create(namespace),
+                module.identifier.create("serializer"),
+              ),
+            )
+            |> module.const_definition.public(),
+          )
+        False ->
+          module
+          |> module.root.add(
+            module.const_definition.create(
+              "decoder",
+              module.binop.access(
+                module.identifier.create(namespace),
+                module.identifier.create("decoder"),
+              ),
+            )
+            |> module.const_definition.public(),
+          )
+      }
+
+      let dependencies =
+        set.from_list([path |> string.join("/")])
+        |> set.union(
+          list.flat_map(table_info.fields, fn(f) { f.dependencies })
+          |> set.from_list,
+        )
+
+      let module =
+        dependencies
+        |> set.to_list()
+        |> list.fold(module, fn(module, dependency) {
+          module.add_import(module, string.split(dependency, "/"))
+        })
+
+      module
     }
-    node.DefineRelationTable(..) -> {
-      do_define_relation_table_node(node, tables)
-      |> result.map(fn(module) {
-        option.Some(module.to_string2(module) <> "\n\n")
-      })
-    }
-    node.Select(fields:, table:, where:, limit:, ..) -> {
-      use table_info <- result.try(
-        dict.get(tables, table)
-        |> result.replace_error("Unknown table for select: " <> table),
-      )
-      let path =
-        result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
-      let path = string.split(path, "/")
-      let namespace = list.last(path) |> result.unwrap("")
+    _ -> {
+      let results =
+        list.filter_map(fields, fn(field) {
+          use res <- result.try(resolve_table_fields(
+            tables,
+            table_info,
+            field.field,
+          ))
 
-      let #(str, dependencies) = case fields {
-        [node.SelectField(field: node.All, alias: _, value: _)] -> {
-          let module =
-            module.root.create()
-            |> module.root.add(module.section_comment("Query result"))
-            |> module.root.add(
-              module.const_definition.create(
-                "QueryResult",
-                module.binop.access(
-                  module.identifier.create(namespace),
-                  module.identifier.create(common.string_to_pascal_case(table)),
-                ),
-              )
-              |> module.const_definition.public()
-              |> module.const_definition.as_type(),
-            )
-            |> module.root.add(
-              module.const_definition.create(
-                "decoder",
-                module.binop.access(
-                  module.identifier.create(namespace),
-                  module.identifier.create("decoder"),
-                ),
-              )
-              |> module.const_definition.public(),
-            )
-            |> module.root.add(
-              module.const_definition.create(
-                "to_json",
-                module.binop.access(
-                  module.identifier.create(namespace),
-                  module.identifier.create("to_json"),
-                ),
-              )
-              |> module.const_definition.public(),
-            )
+          Ok(
+            ResolveTableFieldsResult(
+              ..res,
+              field: extractor.TableField(
+                ..res.field,
+                name: field.alias |> option.unwrap(res.field.name),
+              ),
+            ),
+          )
+        })
 
-          let str = module.to_string(module)
+      let fields = list.map(results, fn(res) { res.field })
 
-          let dependencies =
-            set.from_list([path |> string.join("/")])
-            |> set.union(
-              list.flat_map(table_info.fields, fn(f) { f.dependencies })
-              |> set.from_list,
-            )
-
-          let dependencies =
-            set.union(
-              retrieve_dependencies_(table_info.fields, tables),
-              dependencies,
-            )
-
-          #(str, dependencies)
-        }
-        _ -> {
-          let results =
-            list.filter_map(fields, fn(field) {
-              use res <- result.try(resolve_table_fields(
-                tables,
-                table_info,
-                field.field,
+      let module =
+        list.fold(fields, module.root.create(), fn(module, field) {
+          case field.object_fields {
+            [] -> module
+            fields -> {
+              module
+              |> module.root.add(generate_type_definition(
+                common.string_to_pascal_case(field.name),
+                fields,
               ))
-
-              Ok(
-                ResolveTableFieldsResult(
-                  ..res,
-                  field: extractor.TableField(
-                    ..res.field,
-                    name: field.alias |> option.unwrap(res.field.name),
-                  ),
-                ),
-              )
-            })
-
-          let fields = list.map(results, fn(res) { res.field })
-
-          let str =
-            list.fold(fields, "", fn(acc, field) {
-              case field.object_fields {
-                [] -> acc
-                fields -> {
-                  let module =
-                    module.root.create()
-                    |> module.root.add(generate_type_definition(
-                      common.string_to_pascal_case(field.name),
-                      fields,
-                    ))
-                    |> module.root.add(generate_type_decoder(
-                      common.string_to_pascal_case(field.name),
-                      fields,
-                      "",
-                    ))
-                    |> module.root.add(generate_type_to_json(
-                      field.name,
-                      fields,
-                      "",
-                    ))
-
-                  module.to_string(module)
-                }
-              }
-            })
-
-          let str = case str {
-            "" -> str
-            _ -> str <> "\n\n"
-          }
-
-          let module =
-            module.root.create()
-            |> module.root.add(module.section_comment("Query result"))
-            |> module.root.add(generate_type_definition("QueryResult", fields))
-            |> module.root.add(generate_type_decoder("QueryResult", fields, ""))
-            |> module.root.add(generate_type_to_json("QueryResult", fields, ""))
-
-          let str = str <> module.to_string(module)
-
-          let dependencies =
-            set.from_list([path |> string.join("/")])
-            |> set.union(
-              list.flat_map(table_info.fields, fn(f) { f.dependencies })
-              |> set.from_list,
-            )
-
-          let dependencies =
-            set.union(retrieve_dependencies_(fields, tables), dependencies)
-
-          let dependencies = set.insert(dependencies, "gleam/dynamic/decode")
-          let dependencies = set.insert(dependencies, "gleam/int")
-          let dependencies = set.insert(dependencies, "gleam/json")
-          let dependencies = set.insert(dependencies, "birl")
-
-          #(str, dependencies)
-        }
-      }
-
-      let dependencies = set.insert(dependencies, "surreal/node")
-      let dependencies = set.insert(dependencies, "gleam/option")
-      let dependencies = set.insert(dependencies, "surreal_ql")
-      let dependencies = set.insert(dependencies, "surreal/identifier")
-      let dependencies = set.insert(dependencies, "surreal/record")
-
-      let str =
-        string.join(
-          dependencies
-            |> set.to_list()
-            |> list.map(fn(dep) { "import " <> dep <> "" }),
-          "\n",
-        )
-        <> "\n\n"
-        <> str
-        <> "\n\n"
-
-      let parameters =
-        list.filter_map(
-          list.filter_map(
-            [
-              option.to_result(where, Nil)
-                |> result.map(pair.new(_, Ok(surreal_type.Bool))),
-              option.to_result(limit, Nil)
-                |> result.map(pair.new(_, Ok(surreal_type.Int))),
-            ],
-            function.identity,
-          ),
-          fn(item) {
-            extract_parameters(item.0, item.1, table_info, tables, namespace)
-          },
-        )
-        |> list.flatten()
-        |> complete_parameter_extraction()
-
-      let str = case parameters {
-        [] -> str
-        _ -> {
-          str
-          <> module.to_string(
-            module.root.create()
-            |> module.root.add(generate_parameters_builder(parameters)),
-          )
-          <> "\n\n"
-        }
-      }
-
-      Ok(option.Some(str))
-    }
-    node.Update(target:, set:, where:) -> {
-      use table_info <- result.try(
-        dict.get(tables, target)
-        |> result.map_error(fn(_) { "Unknown table for update: " <> target }),
-      )
-
-      let path =
-        result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
-      let path = string.split(path, "/")
-      let namespace = list.last(path) |> result.unwrap("")
-      let str =
-        "pub type QueryResult = "
-        <> namespace
-        <> "."
-        <> common.string_to_pascal_case(target)
-        <> "\n"
-
-      let str = str <> "\npub const decoder = " <> namespace <> ".decoder"
-
-      let str = str <> "\n\npub const to_json = " <> namespace <> ".to_json"
-
-      let dependencies = set.from_list([path |> string.join("/")])
-      let dependencies =
-        set.union(
-          retrieve_dependencies_(table_info.fields, tables),
-          dependencies,
-        )
-
-      let dependencies = set.insert(dependencies, "surreal/node")
-      let dependencies = set.insert(dependencies, "gleam/option")
-      let dependencies = set.insert(dependencies, "surreal_ql")
-      let dependencies = set.insert(dependencies, "surreal/identifier")
-      let dependencies = set.insert(dependencies, "surreal/record")
-      let dependencies = set.insert(dependencies, "birl")
-
-      let parameters =
-        list.filter_map(
-          case where {
-            option.Some(item) ->
-              list.append(
-                set |> list.map(fn(item) { pair.new(item, Error(Nil)) }),
-                [#(item, Ok(surreal_type.Bool))],
-              )
-            _ ->
-              set
-              |> list.map(fn(item) { pair.new(item, Error(Nil)) })
-          },
-          fn(item) {
-            extract_parameters(item.0, item.1, table_info, tables, namespace)
-          },
-        )
-        |> list.flatten()
-        |> complete_parameter_extraction()
-
-      let str = case parameters {
-        [] -> str
-        _ -> {
-          let str =
-            str
-            <> "\n\n"
-            <> module.to_string(
-              module.root.create()
-              |> module.root.add(generate_parameters_builder(parameters)),
-            )
-
-          str
-        }
-      }
-
-      let str =
-        string.join(
-          dependencies
-            |> set.to_list()
-            |> list.map(fn(dep) { "import " <> dep <> "" }),
-          "\n",
-        )
-        <> "\n\n"
-        <> str
-        <> "\n\n"
-
-      Ok(option.Some(str))
-    }
-    node.Create(target:, set:) -> {
-      use table_info <- result.try(
-        dict.get(tables, target)
-        |> result.map_error(fn(_) { "Unknown table for create: " <> target }),
-      )
-
-      let path =
-        result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
-      let path = string.split(path, "/")
-      let namespace = list.last(path) |> result.unwrap("")
-      let str =
-        "pub type QueryResult = "
-        <> namespace
-        <> "."
-        <> common.string_to_pascal_case(target)
-        <> "\n"
-
-      let str = str <> "\npub const decoder = " <> namespace <> ".decoder"
-
-      let str = str <> "\n\npub const to_json = " <> namespace <> ".to_json"
-
-      let dependencies = set.from_list([path |> string.join("/")])
-      let dependencies =
-        set.union(
-          retrieve_dependencies_(table_info.fields, tables),
-          dependencies,
-        )
-
-      let dependencies = set.insert(dependencies, "surreal/node")
-      let dependencies = set.insert(dependencies, "gleam/option")
-      let dependencies = set.insert(dependencies, "surreal_ql")
-      let dependencies = set.insert(dependencies, "surreal/identifier")
-      let dependencies = set.insert(dependencies, "surreal/record")
-      let dependencies = set.insert(dependencies, "birl")
-
-      let parameters =
-        list.filter_map(
-          list.map(set, fn(item) { pair.new(item, Error(Nil)) }),
-          fn(item) {
-            extract_parameters(item.0, item.1, table_info, tables, namespace)
-          },
-        )
-        |> list.flatten()
-        |> complete_parameter_extraction()
-
-      let str = case parameters {
-        [] -> str
-        _ -> {
-          let str =
-            str
-            <> "\n\n"
-            <> module.to_string(
-              module.root.create()
-              |> module.root.add(generate_parameters_builder(parameters)),
-            )
-
-          str
-        }
-      }
-
-      let str =
-        string.join(
-          dependencies
-            |> set.to_list()
-            |> list.map(fn(dep) { "import " <> dep <> "" }),
-          "\n",
-        )
-        <> "\n\n"
-        <> str
-        <> "\n\n"
-
-      Ok(option.Some(str))
-    }
-    node.Delete(target:, where:) -> {
-      case target {
-        node.BinaryOperator(
-          lhs: from,
-          operator: node.RelationTo,
-          rhs: node.Identifier(name),
-        ) -> {
-          use table_info <- result.try(
-            dict.get(tables, name)
-            |> result.replace_error("Unknown table for update: " <> name),
-          )
-
-          let path =
-            result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
-          let path = string.split(path, "/")
-          let namespace = list.last(path) |> result.unwrap("")
-
-          let module =
-            module.root.create()
-            |> module.root.add(
-              module.const_definition.create("QueryResult", module.literal.nil)
-              |> module.const_definition.as_type()
-              |> module.const_definition.public(),
-            )
-            |> module.root.add(
-              module.function_definition.create()
-              |> module.function_definition.public()
-              |> module.function_definition.with_name("decoder")
-              |> module.function_definition.add(
-                module.function_call.create(module.binop.access(
-                  module.identifier.create("decode"),
-                  module.identifier.create("success"),
-                ))
-                |> module.function_call.add(module.literal.nil),
-              ),
-            )
-            |> module.root.add(
-              module.const_definition.create(
-                "to_json",
-                module.binop.access(
-                  module.identifier.create("json"),
-                  module.identifier.create("null"),
-                ),
-              )
-              |> module.const_definition.public(),
-            )
-
-          let module =
-            retrieve_dependencies(module, table_info.fields, tables)
-            |> module.add_import(path)
-            |> module.add_import(["gleam", "dynamic", "decode"])
-            |> module.add_import(["gleam", "json"])
-            |> module.add_import(["surreal_ql"])
-            |> module.add_import(["surreal", "node"])
-            |> module.add_import(["gleam", "option"])
-
-          let str = module.to_string2(module)
-
-          let in =
-            table_info.fields
-            |> list.find(fn(f) { f.name == "in" })
-            |> result.map(fn(f) {
-              case f.type_ {
-                surreal_type.Record(record) ->
-                  case string.contains(record, ".") {
-                    True ->
-                      extractor.TableField(
-                        ..f,
-                        type_: surreal_type.Identifier(record),
-                      )
-                    _ -> {
-                      dict.get(tables, string.lowercase(record))
-                      |> result.map(fn(info) {
-                        extractor.TableField(
-                          ..f,
-                          type_: surreal_type.Identifier(
-                            common.namespace_of(info.path)
-                            <> "."
-                            <> common.to_pascal_case(info.name).value,
-                          ),
-                        )
-                      })
-                      |> result.unwrap(f)
-                    }
-                  }
-                _ -> f
-              }
-            })
-            |> result.unwrap(
-              extractor.TableField(
-                dependencies: [],
-                name: "in",
-                type_: surreal_type.Record("Nil"),
-                linked_enum: option.None,
-                object_fields: [],
-              ),
-            )
-
-          let parameters =
-            list.filter_map(
-              [#(from, Ok(in.type_))]
-                |> list.append(case where {
-                  option.Some(item) -> [#(item, Ok(surreal_type.Bool))]
-                  _ -> []
-                }),
-              fn(item) {
-                extract_parameters(
-                  item.0,
-                  item.1,
-                  table_info,
-                  tables,
-                  namespace,
-                )
-              },
-            )
-            |> list.flatten()
-            |> complete_parameter_extraction()
-
-          let str = case parameters {
-            [] -> str
-            _ -> {
-              let str =
-                str
-                <> "\n\n"
-                <> module.to_string(
-                  module.root.create()
-                  |> module.root.add(generate_parameters_builder(parameters)),
-                )
-
-              str
+              |> module.root.add(generate_type_decoder(
+                config,
+                common.string_to_pascal_case(field.name),
+                fields,
+                "",
+              ))
+              |> module.root.add(generate_type_to_json(field.name, fields, ""))
             }
           }
+        })
 
-          let str = str <> "\n\n"
+      let module =
+        module
+        |> module.root.add(module.section_comment("Query result"))
+        |> module.root.add(generate_type_definition("QueryResult", fields))
+        |> module.root.add(generate_type_decoder(
+          config,
+          "QueryResult",
+          fields,
+          "",
+        ))
+        |> module.root.add(generate_type_to_json("QueryResult", fields, ""))
 
-          Ok(option.Some(str))
-        }
-        _ -> {
-          io.println(
-            "Warning: unsupported delete target: " <> node.to_string(target),
-          )
-          Ok(option.None)
-        }
-      }
+      let dependencies =
+        set.from_list([path |> string.join("/")])
+        |> set.union(
+          list.flat_map(table_info.fields, fn(f) { f.dependencies })
+          |> set.from_list,
+        )
+
+      let module =
+        dependencies
+        |> set.to_list()
+        |> list.fold(module, fn(module, dependency) {
+          module.add_import(module, string.split(dependency, "/"))
+        })
+
+      module
     }
-    node.Relate(table:, from:, to:, set:) -> {
+  }
+
+  let parameters =
+    list.filter_map(
+      list.filter_map(
+        [
+          option.to_result(where, Nil)
+            |> result.map(pair.new(_, Ok(surreal_type.Bool))),
+          option.to_result(limit, Nil)
+            |> result.map(pair.new(_, Ok(surreal_type.Int))),
+        ],
+        function.identity,
+      ),
+      fn(item) {
+        extract_parameters(item.0, item.1, table_info, tables, namespace)
+      },
+    )
+    |> list.flatten()
+    |> complete_parameter_extraction()
+
+  let module = case parameters {
+    [] -> module
+    _ -> {
+      module
+      |> module.root.add(generate_parameters_builder(parameters))
+    }
+  }
+
+  Ok(module)
+}
+
+fn do_update_node(
+  config: common.Configuration,
+  node: node.Node,
+  tables: dict.Dict(String, extractor.TableInfo),
+) -> Result(module.Module, String) {
+  let assert node.Update(target:, set:, where:) = node
+
+  use table_info <- result.try(
+    dict.get(tables, target)
+    |> result.map_error(fn(_) { "Unknown table for update: " <> target }),
+  )
+
+  let path =
+    result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
+  let path = string.split(path, "/")
+  let namespace = list.last(path) |> result.unwrap("")
+
+  let module =
+    module.root.create()
+    |> module.root.add(
+      module.const_definition.create(
+        "QueryResult",
+        module.binop.access(
+          module.identifier.create(namespace),
+          module_common.type_identifier(target),
+        ),
+      )
+      |> module.const_definition.public()
+      |> module.const_definition.as_type(),
+    )
+
+  let module =
+    module
+    |> module.root.add(case config.backstage {
+      True ->
+        module.const_definition.create(
+          "serializer",
+          module.binop.access(
+            module.identifier.create(namespace),
+            module.identifier.create("serializer"),
+          ),
+        )
+        |> module.const_definition.public()
+      False ->
+        module.const_definition.create(
+          "decoder",
+          module.binop.access(
+            module.identifier.create(namespace),
+            module.identifier.create("decoder"),
+          ),
+        )
+        |> module.const_definition.public()
+    })
+
+  let module =
+    module
+    |> module.root.add(
+      module.const_definition.create(
+        "to_json",
+        module.binop.access(
+          module.identifier.create(namespace),
+          module.identifier.create("to_json"),
+        ),
+      )
+      |> module.const_definition.public(),
+    )
+
+  let dependencies = set.from_list([path |> string.join("/")])
+  let dependencies =
+    set.union(retrieve_dependencies_(table_info.fields, tables), dependencies)
+
+  let module =
+    dependencies
+    |> set.to_list()
+    |> list.fold(module, fn(module, dependency) {
+      module.add_import(module, string.split(dependency, "/"))
+    })
+
+  let parameters =
+    list.filter_map(
+      case where {
+        option.Some(item) ->
+          list.append(set |> list.map(fn(item) { pair.new(item, Error(Nil)) }), [
+            #(item, Ok(surreal_type.Bool)),
+          ])
+        _ ->
+          set
+          |> list.map(fn(item) { pair.new(item, Error(Nil)) })
+      },
+      fn(item) {
+        extract_parameters(item.0, item.1, table_info, tables, namespace)
+      },
+    )
+    |> list.flatten()
+    |> complete_parameter_extraction()
+
+  let module = case parameters {
+    [] -> module
+    _ -> module.root.add(module, generate_parameters_builder(parameters))
+  }
+
+  Ok(module)
+}
+
+fn do_create_node(
+  config: common.Configuration,
+  node: node.Node,
+  tables: dict.Dict(String, extractor.TableInfo),
+) -> Result(module.Module, String) {
+  let assert node.Create(target:, set:) = node
+  use table_info <- result.try(
+    dict.get(tables, target)
+    |> result.map_error(fn(_) { "Unknown table for create: " <> target }),
+  )
+
+  let path =
+    result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
+  let path = string.split(path, "/")
+  let namespace = list.last(path) |> result.unwrap("")
+
+  let module =
+    module.root.create()
+    |> module.root.add(
+      module.const_definition.create(
+        "QueryResult",
+        module.binop.access(
+          module.identifier.create(namespace),
+          module_common.type_identifier(target),
+        ),
+      )
+      |> module.const_definition.public()
+      |> module.const_definition.as_type(),
+    )
+
+  let module =
+    module
+    |> module.root.add(case config.backstage {
+      True ->
+        module.const_definition.create(
+          "serializer",
+          module.binop.access(
+            module.identifier.create(namespace),
+            module.identifier.create("serializer"),
+          ),
+        )
+        |> module.const_definition.public()
+      False ->
+        module.const_definition.create(
+          "decoder",
+          module.binop.access(
+            module.identifier.create(namespace),
+            module.identifier.create("decoder"),
+          ),
+        )
+        |> module.const_definition.public()
+    })
+
+  let module =
+    module
+    |> module.root.add(
+      module.const_definition.create(
+        "to_json",
+        module.binop.access(
+          module.identifier.create(namespace),
+          module.identifier.create("to_json"),
+        ),
+      )
+      |> module.const_definition.public(),
+    )
+
+  let dependencies = set.from_list([path |> string.join("/")])
+  let dependencies =
+    set.union(retrieve_dependencies_(table_info.fields, tables), dependencies)
+
+  let module =
+    dependencies
+    |> set.to_list()
+    |> list.fold(module, fn(module, dependency) {
+      module.add_import(module, string.split(dependency, "/"))
+    })
+
+  let parameters =
+    list.filter_map(
+      list.map(set, fn(item) { pair.new(item, Error(Nil)) }),
+      fn(item) {
+        extract_parameters(item.0, item.1, table_info, tables, namespace)
+      },
+    )
+    |> list.flatten()
+    |> complete_parameter_extraction()
+
+  let module = case parameters {
+    [] -> module
+    _ -> module.root.add(module, generate_parameters_builder(parameters))
+  }
+
+  Ok(module)
+}
+
+fn do_delete_node(
+  config: common.Configuration,
+  node: node.Node,
+  tables: dict.Dict(String, extractor.TableInfo),
+) -> Result(module.Module, String) {
+  let assert node.Delete(target:, where:) = node
+
+  case target {
+    node.BinaryOperator(
+      lhs: from,
+      operator: node.RelationTo,
+      rhs: node.Identifier(name),
+    ) -> {
       use table_info <- result.try(
-        dict.get(tables, table)
-        |> result.replace_error("Unknown table for update: " <> table),
+        dict.get(tables, name)
+        |> result.replace_error("Unknown table for update: " <> name),
       )
 
       let path =
         result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
       let path = string.split(path, "/")
       let namespace = list.last(path) |> result.unwrap("")
-      let str =
-        "pub type QueryResult = "
-        <> namespace
-        <> "."
-        <> common.string_to_pascal_case(table)
-        <> "\n"
 
-      let str = str <> "\npub const decoder = " <> namespace <> ".decoder"
-
-      let str = str <> "\n\npub const to_json = " <> namespace <> ".to_json"
-
-      let dependencies = set.from_list([path |> string.join("/")])
-      let dependencies =
-        set.union(
-          retrieve_dependencies_(table_info.fields, tables),
-          dependencies,
+      let module =
+        module.root.create()
+        |> module.root.add(
+          module.const_definition.create("QueryResult", module.literal.nil)
+          |> module.const_definition.as_type()
+          |> module.const_definition.public(),
         )
+        |> module.root.add(
+          module.const_definition.create(
+            "to_json",
+            module.binop.access(
+              module.identifier.create("json"),
+              module.identifier.create("null"),
+            ),
+          )
+          |> module.const_definition.public(),
+        )
+        |> module.add_import(["gleam", "json"])
 
-      let dependencies = set.insert(dependencies, "surreal/node")
-      let dependencies = set.insert(dependencies, "surreal_ql")
-      let dependencies = set.insert(dependencies, "gleam/option")
-      let dependencies = set.insert(dependencies, "surreal/identifier")
-      let dependencies = set.insert(dependencies, "surreal/record")
+      let module = case config.backstage {
+        True ->
+          module
+          |> module.root.add(
+            module.function_definition.create()
+            |> module.function_definition.public()
+            |> module.function_definition.with_name("serializer")
+            |> module.function_definition.add(
+              module.function_call.create(module.binop.access(
+                module.identifier.create("serialize"),
+                module.identifier.create("nil"),
+              )),
+            ),
+          )
+          |> module.add_import(["dynamic", "serialize"])
+        False ->
+          module
+          |> module.root.add(
+            module.function_definition.create()
+            |> module.function_definition.public()
+            |> module.function_definition.with_name("decoder")
+            |> module.function_definition.add(
+              module.function_call.create(module.binop.access(
+                module.identifier.create("decode"),
+                module.identifier.create("success"),
+              ))
+              |> module.function_call.add(module.literal.nil),
+            ),
+          )
+          |> module.add_import(["gleam", "dynamic", "decode"])
+      }
+
+      let module =
+        retrieve_dependencies(module, table_info.fields, tables)
+        |> module.add_import(path)
 
       let in =
         table_info.fields
@@ -2653,13 +2953,17 @@ fn do_node(
           case f.type_ {
             surreal_type.Record(record) ->
               case string.contains(record, ".") {
-                True -> f
+                True ->
+                  extractor.TableField(
+                    ..f,
+                    type_: surreal_type.Identifier(record),
+                  )
                 _ -> {
                   dict.get(tables, string.lowercase(record))
                   |> result.map(fn(info) {
                     extractor.TableField(
                       ..f,
-                      type_: surreal_type.Record(
+                      type_: surreal_type.Identifier(
                         common.namespace_of(info.path)
                         <> "."
                         <> common.to_pascal_case(info.name).value,
@@ -2681,48 +2985,14 @@ fn do_node(
             object_fields: [],
           ),
         )
-      let out =
-        table_info.fields
-        |> list.find(fn(f) { f.name == "out" })
-        |> result.map(fn(f) {
-          case f.type_ {
-            surreal_type.Record(record) ->
-              case string.contains(record, ".") {
-                True -> f
-                _ -> {
-                  dict.get(tables, string.lowercase(record))
-                  |> result.map(fn(info) {
-                    extractor.TableField(
-                      ..f,
-                      type_: surreal_type.Record(
-                        common.namespace_of(info.path)
-                        <> "."
-                        <> common.to_pascal_case(info.name).value,
-                      ),
-                    )
-                  })
-                  |> result.unwrap(f)
-                }
-              }
-            _ -> f
-          }
-        })
-        |> result.unwrap(
-          extractor.TableField(
-            dependencies: [],
-            name: "out",
-            type_: surreal_type.Record("Nil"),
-            linked_enum: option.None,
-            object_fields: [],
-          ),
-        )
 
       let parameters =
         list.filter_map(
-          list.append(set |> list.map(pair.new(_, Error(Nil))), [
-            #(from, Ok(in.type_)),
-            #(to, Ok(out.type_)),
-          ]),
+          [#(from, Ok(in.type_))]
+            |> list.append(case where {
+              option.Some(item) -> [#(item, Ok(surreal_type.Bool))]
+              _ -> []
+            }),
           fn(item) {
             extract_parameters(item.0, item.1, table_info, tables, namespace)
           },
@@ -2730,35 +3000,220 @@ fn do_node(
         |> list.flatten()
         |> complete_parameter_extraction()
 
-      let str = case parameters {
-        [] -> str
-        _ -> {
-          let str =
-            str
-            <> "\n\n"
-            <> module.to_string(
-              module.root.create()
-              |> module.root.add(generate_parameters_builder(parameters)),
-            )
-
-          str
-        }
+      let module = case parameters {
+        [] -> module
+        _ -> module.root.add(module, generate_parameters_builder(parameters))
       }
 
-      let str =
-        string.join(
-          dependencies
-            |> set.to_list()
-            |> list.map(fn(dep) { "import " <> dep <> "" }),
-          "\n",
-        )
-        <> "\n\n"
-        <> str
-        <> "\n\n"
-
-      Ok(option.Some(str))
+      Ok(module)
     }
-    _ -> Ok(option.None)
+    _ -> {
+      io.println(
+        "Warning: unsupported delete target: " <> node.to_string(target),
+      )
+      Ok(module.root.create())
+    }
+  }
+}
+
+fn do_relate_node(
+  config: common.Configuration,
+  node: node.Node,
+  tables: dict.Dict(String, extractor.TableInfo),
+) -> Result(module.Module, String) {
+  let assert node.Relate(table:, from:, to:, set:) = node
+
+  use table_info <- result.try(
+    dict.get(tables, table)
+    |> result.replace_error("Unknown table for update: " <> table),
+  )
+
+  let path =
+    result.unwrap(string.split_once(table_info.path, "src/"), #("", "")).1
+  let path = string.split(path, "/")
+  let namespace = list.last(path) |> result.unwrap("")
+
+  let module =
+    module.root.create()
+    |> module.root.add(
+      module.const_definition.create(
+        "QueryResult",
+        module.binop.access(
+          module.identifier.create(namespace),
+          module_common.type_identifier(table),
+        ),
+      )
+      |> module.const_definition.public()
+      |> module.const_definition.as_type(),
+    )
+
+  let module =
+    module
+    |> module.root.add(case config.backstage {
+      True ->
+        module.const_definition.create(
+          "serializer",
+          module.binop.access(
+            module.identifier.create(namespace),
+            module.identifier.create("serializer"),
+          ),
+        )
+        |> module.const_definition.public()
+      False ->
+        module.const_definition.create(
+          "decoder",
+          module.binop.access(
+            module.identifier.create(namespace),
+            module.identifier.create("decoder"),
+          ),
+        )
+        |> module.const_definition.public()
+    })
+
+  let module =
+    module
+    |> module.root.add(
+      module.const_definition.create(
+        "to_json",
+        module.binop.access(
+          module.identifier.create(namespace),
+          module.identifier.create("to_json"),
+        ),
+      )
+      |> module.const_definition.public(),
+    )
+
+  let dependencies = set.from_list([path |> string.join("/")])
+  let dependencies =
+    set.union(retrieve_dependencies_(table_info.fields, tables), dependencies)
+
+  let in =
+    table_info.fields
+    |> list.find(fn(f) { f.name == "in" })
+    |> result.map(fn(f) {
+      case f.type_ {
+        surreal_type.Record(record) ->
+          case string.contains(record, ".") {
+            True -> f
+            _ -> {
+              dict.get(tables, string.lowercase(record))
+              |> result.map(fn(info) {
+                extractor.TableField(
+                  ..f,
+                  type_: surreal_type.Record(
+                    common.namespace_of(info.path)
+                    <> "."
+                    <> common.to_pascal_case(info.name).value,
+                  ),
+                )
+              })
+              |> result.unwrap(f)
+            }
+          }
+        _ -> f
+      }
+    })
+    |> result.unwrap(
+      extractor.TableField(
+        dependencies: [],
+        name: "in",
+        type_: surreal_type.Record("Nil"),
+        linked_enum: option.None,
+        object_fields: [],
+      ),
+    )
+  let out =
+    table_info.fields
+    |> list.find(fn(f) { f.name == "out" })
+    |> result.map(fn(f) {
+      case f.type_ {
+        surreal_type.Record(record) ->
+          case string.contains(record, ".") {
+            True -> f
+            _ -> {
+              dict.get(tables, string.lowercase(record))
+              |> result.map(fn(info) {
+                extractor.TableField(
+                  ..f,
+                  type_: surreal_type.Record(
+                    common.namespace_of(info.path)
+                    <> "."
+                    <> common.to_pascal_case(info.name).value,
+                  ),
+                )
+              })
+              |> result.unwrap(f)
+            }
+          }
+        _ -> f
+      }
+    })
+    |> result.unwrap(
+      extractor.TableField(
+        dependencies: [],
+        name: "out",
+        type_: surreal_type.Record("Nil"),
+        linked_enum: option.None,
+        object_fields: [],
+      ),
+    )
+
+  let parameters =
+    list.filter_map(
+      list.append(set |> list.map(pair.new(_, Error(Nil))), [
+        #(from, Ok(in.type_)),
+        #(to, Ok(out.type_)),
+      ]),
+      fn(item) {
+        extract_parameters(item.0, item.1, table_info, tables, namespace)
+      },
+    )
+    |> list.flatten()
+    |> complete_parameter_extraction()
+
+  let module =
+    dependencies
+    |> set.to_list()
+    |> list.fold(module, fn(module, dependency) {
+      module.add_import(module, string.split(dependency, "/"))
+    })
+
+  let module = case parameters {
+    [] -> module
+    _ -> module.root.add(module, generate_parameters_builder(parameters))
+  }
+
+  Ok(module)
+}
+
+fn do_node(
+  config: common.Configuration,
+  node: node.Node,
+  tables: dict.Dict(String, extractor.TableInfo),
+) -> Result(module.Module, String) {
+  case node {
+    node.DefineNormalTable(..) -> {
+      do_define_normal_table_node(config, node, tables)
+    }
+    node.DefineRelationTable(..) -> {
+      do_define_relation_table_node(config, node, tables)
+    }
+    node.Select(..) -> {
+      do_select_node(config, node, tables)
+    }
+    node.Update(..) -> {
+      do_update_node(config, node, tables)
+    }
+    node.Create(..) -> {
+      do_create_node(config, node, tables)
+    }
+    node.Delete(..) -> {
+      do_delete_node(config, node, tables)
+    }
+    node.Relate(..) -> {
+      do_relate_node(config, node, tables)
+    }
+    _ -> Ok(module.root.create())
   }
 }
 
@@ -2857,20 +3312,18 @@ pub fn process_delegated_table(
 }
 
 pub fn generate_file(
+  config: common.Configuration,
   raw: String,
   ast: List(node.Node),
   tables: dict.Dict(String, extractor.TableInfo),
 ) -> Result(String, String) {
-  use generated <- result.try(
-    list.try_map(ast, fn(node) { do_node(node, tables) }),
-  )
+  use generated <- result.try(list.try_map(ast, do_node(config, _, tables)))
 
-  let content =
-    string.join(list.filter_map(generated, option.to_result(_, Nil)), "\n\n")
+  let module =
+    module.root.create()
+    |> list.fold(generated, _, module.root.add)
 
   // Generate the query constant
-  let module = module.root.create()
-
   let module =
     module
     |> module.root.add(module.section_comment("Raw query"))
@@ -2887,16 +3340,12 @@ pub fn generate_file(
     |> module.root.add(
       module.const_definition.create(
         "query",
-        module.literal.list(
-          list.map(ast, fn(node) {
-            module.identifier.create(node.to_gleam_code(node))
-          }),
-        ),
+        module.literal.list(list.map(ast, node.to_module)),
       )
       |> module.const_definition.public(),
     )
 
-  let content = content <> module.to_string(module)
+  let content = module.to_string2(module)
 
   Ok(content)
 }

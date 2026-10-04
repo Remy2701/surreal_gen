@@ -654,3 +654,12 @@ pub fn split_statements(tokens: List(Token)) -> List(List(Token)) {
     _ -> list.append(statements, [current])
   }
 }
+
+pub fn render_error(error: LexerError, content: String) -> String {
+  positioned.render(
+    positioned.Positioned(Nil, error.position, error.position),
+    content,
+  )
+  <> "\n\n"
+  <> error.message
+}

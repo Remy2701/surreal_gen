@@ -1,5 +1,6 @@
 import gleam/list
 import gleam/option
+import gleam/string
 import lexer
 import positioned.{type Positioned, Positioned}
 import surreal/node
@@ -1091,4 +1092,39 @@ pub fn parse(
   input: List(Positioned(lexer.Token)),
 ) -> Result(List(node.Node), ParserError) {
   do_parse(ParserState([]), input)
+}
+
+pub fn render_error(error: ParserError, content: String) -> String {
+  case error {
+    UnexpectedToken(expected:, actual:) -> {
+      positioned.render(actual, content)
+      <> "\n\n"
+      <> "Unexpected token: "
+      <> string.inspect(actual.value)
+      <> "\nExpected one of: "
+      <> string.join(
+        list.map(expected, fn(e) {
+          case e {
+            NodeExpression -> "NodeExpression"
+            NodeType -> "NodeType"
+            Token(token) -> "Token(" <> string.inspect(token) <> ")"
+          }
+        }),
+        ", ",
+      )
+    }
+    UnexpectedEOF(expected:) -> {
+      "Unexpected end of file\nExpected one of: "
+      <> string.join(
+        list.map(expected, fn(e) {
+          case e {
+            NodeExpression -> "NodeExpression"
+            NodeType -> "NodeType"
+            Token(token) -> "Token(" <> string.inspect(token) <> ")"
+          }
+        }),
+        ", ",
+      )
+    }
+  }
 }
