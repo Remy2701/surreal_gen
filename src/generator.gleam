@@ -1283,11 +1283,9 @@ fn retrieve_dependencies_(
   list.fold(fields, set.new(), fn(acc, field) {
     let acc = case field.type_ {
       surreal_type.Datetime -> acc
-      surreal_type.Option(surreal_type.Datetime) ->
-        acc
-        |> set.insert("gleam/option")
+      surreal_type.Option(surreal_type.Datetime) -> acc
       surreal_type.Identifier(name) ->
-        set.insert(acc, "surreal/identifier")
+        acc
         |> case
           dict.get(
             tables,
@@ -1298,7 +1296,7 @@ fn retrieve_dependencies_(
           _ -> function.identity
         }
       surreal_type.Record(name) ->
-        set.insert(acc, "surreal/record")
+        acc
         |> case
           dict.get(
             tables,
@@ -1308,9 +1306,9 @@ fn retrieve_dependencies_(
           Ok(info) -> set.insert(_, info.path |> string.remove_prefix("./src/"))
           _ -> function.identity
         }
-      surreal_type.Option(_) -> set.insert(acc, "gleam/option")
+      surreal_type.Option(_) -> acc
       surreal_type.Object -> acc
-      surreal_type.Point -> set.insert(acc, "surreal/point")
+      surreal_type.Point -> acc
       _ -> acc
     }
 
@@ -1328,15 +1326,13 @@ fn retrieve_dependencies(
 ) -> module.Module {
   list.fold(fields, module, fn(module, field) {
     let module = case field.type_ {
-      surreal_type.Datetime ->
-        module.add_import(module, ["gleam", "time", "timestamp"])
+      surreal_type.Datetime -> module
       surreal_type.Option(surreal_type.Datetime) ->
         module
         |> module.add_import(["gleam", "option"])
         |> module.add_import(["gleam", "time", "timestamp"])
       surreal_type.Identifier(name) ->
         module
-        |> module.add_import(["surreal", "identifier"])
         |> case
           dict.get(
             tables,
@@ -1350,7 +1346,7 @@ fn retrieve_dependencies(
           _ -> function.identity
         }
       surreal_type.Record(name) ->
-        module.add_import(module, ["surreal", "record"])
+        module
         |> case
           dict.get(
             tables,
@@ -1363,9 +1359,9 @@ fn retrieve_dependencies(
           )
           _ -> function.identity
         }
-      surreal_type.Option(_) -> module.add_import(module, ["gleam", "option"])
-      surreal_type.Object -> module.add_import(module, ["json_value"])
-      surreal_type.Point -> module.add_import(module, ["surreal", "point"])
+      surreal_type.Option(_) -> module
+      surreal_type.Object -> module
+      surreal_type.Point -> module
       _ -> module
     }
 
@@ -1384,20 +1380,13 @@ fn resolve_dependencies(
     let #(module, fields) = acc
 
     let #(module, fields) = case field.type_ {
-      surreal_type.Datetime -> #(
-        module.add_import(module, ["gleam", "time", "timestamp"]),
-        list.append(fields, [field]),
-      )
+      surreal_type.Datetime -> #(module, list.append(fields, [field]))
       surreal_type.Option(surreal_type.Datetime) -> #(
         module
-          |> module.add_import(["gleam", "option"])
-          |> module.add_import(["gleam", "time", "timestamp"]),
+          |> module.add_import(["gleam", "option"]),
         list.append(fields, [field]),
       )
-      surreal_type.Identifier(_) -> #(
-        module.add_import(module, ["surreal", "identifier"]),
-        list.append(fields, [field]),
-      )
+      surreal_type.Identifier(_) -> #(module, list.append(fields, [field]))
       surreal_type.Record(name) -> {
         let table = dict.get(tables, string.lowercase(name))
 
@@ -1495,10 +1484,7 @@ fn resolve_dependencies(
         module.add_import(module, ["gleam", "option"]),
         list.append(fields, [field]),
       )
-      surreal_type.Object -> #(
-        module.add_import(module, ["json_value"]),
-        list.append(fields, [field]),
-      )
+      surreal_type.Object -> #(module, list.append(fields, [field]))
       surreal_type.Point -> #(
         module.add_import(module, ["surreal", "point"]),
         list.append(fields, [field]),
@@ -1588,7 +1574,6 @@ fn link_type(
               Ok(current) ->
                 set.from_list([
                   common.to_gleam_path(current.path),
-                  "surreal/identifier",
                 ])
               _ -> {
                 io.println("Warning: Could not resolve table `" <> inner <> "`")
@@ -2353,7 +2338,8 @@ fn generate_parameters_builder(
             module.binop.access(
               module.identifier.create("surreal_ql"),
               module.identifier.create("SurrealQL"),
-            ),
+            )
+              |> module.add_import(["surreal_ql"]),
           ]),
         ),
       ),

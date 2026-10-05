@@ -54,29 +54,6 @@ pub type TableInfo {
   )
 }
 
-fn dependencies_of(type_: surreal_type.SurrealType) -> List(String) {
-  case type_ {
-    surreal_type.Datetime -> ["birl"]
-    surreal_type.Int -> []
-    surreal_type.Float -> []
-    surreal_type.Identifier(_) -> ["surreal/identifier"]
-    surreal_type.Record(_) -> ["surreal/record"]
-    surreal_type.String -> []
-    surreal_type.Bool -> []
-    surreal_type.Option(inner) ->
-      set.from_list(["gleam/option"])
-      |> set.union(set.from_list(dependencies_of(inner)))
-      |> set.to_list()
-    surreal_type.Array(inner) ->
-      set.from_list([])
-      |> set.union(set.from_list(dependencies_of(inner)))
-      |> set.to_list()
-    surreal_type.Point -> ["surreal/point"]
-    surreal_type.Object -> ["json_value"]
-    surreal_type.None -> []
-  }
-}
-
 /// Resolve the field with support for nested fields (e.g. `tags.*`). this is useful for arrays 
 /// which define constraints on the inner type and objects.
 fn resolve_nested_field(
@@ -93,10 +70,10 @@ fn resolve_nested_field(
       |> list.filter(fn(f) { f.name != name })
       |> list.append([
         TableField(
-          dependencies: list.append(dependencies_of(type_), case enum {
+          dependencies: case enum {
             option.Some(_) -> [string.remove_prefix(path, "./src/")]
             _ -> []
-          }),
+          },
           name: name,
           type_: type_,
           linked_enum: enum,
@@ -109,7 +86,7 @@ fn resolve_nested_field(
       use resolved <- result.try(
         resolve_nested_field(path, lhs, [], surreal_type.Object, option.None, [
           TableField(
-            dependencies: dependencies_of(type_),
+            dependencies: [],
             name: node.to_string(rhs),
             type_: type_,
             linked_enum: enum,
@@ -159,7 +136,6 @@ fn extract_normal_table(
           option.None -> [
             TableField(
               dependencies: [
-                "surreal/identifier",
                 string.remove_prefix(path, "./src/"),
               ],
               name: "id",
@@ -193,7 +169,6 @@ fn extract_relation_table(
         fields: [
           TableField(
             dependencies: [
-              "surreal/identifier",
               string.remove_prefix(path, "./src/"),
             ],
             name: "id",
