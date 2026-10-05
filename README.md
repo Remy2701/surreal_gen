@@ -7,10 +7,18 @@ An (experimental) code generation library for .surql files.
 
 ```toml
 [dev_dependencies]
-surreal_gen = { git = "https://github.com/Remy2701/surreal_gen.git", ref = "v0.2.1" }
+surreal_gen = { git = "https://github.com/Remy2701/surreal_gen.git", ref = "v0.2.2" }
 ```
 
+# Running the generator
+
+**No integration:**
 ```sh
 gleam run -m surreal_gen
+```
+
+**Backstage integration:**
+```sh
+gleam run -m surreal_gen -- --backstage
 ```
 
