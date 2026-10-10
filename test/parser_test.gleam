@@ -2,9 +2,9 @@ import gleam/option
 import gleeunit/should
 import lexer
 import parser
-import surreal/node
-import surreal_ql
-import surreal_type
+import suweal/node
+import suweal/surreal_ql
+import suweal/surreal_type
 
 pub fn parse_define_table_test() {
   let assert Ok(ast) =

@@ -3,9 +3,9 @@ import gleam/option
 import gleam/string
 import lexer
 import positioned.{type Positioned, Positioned}
-import surreal/node
-import surreal_ql
-import surreal_type
+import suweal/node
+import suweal/surreal_ql
+import suweal/surreal_type
 
 type ParserState {
   ParserState(ast: List(node.Node))

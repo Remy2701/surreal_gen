@@ -1,4 +1,4 @@
-import module.{type Module}
+import omcg/module.{type Module}
 
 pub fn decoder(of: Module) -> Module {
   module.binop.access(
@@ -7,7 +7,7 @@ pub fn decoder(of: Module) -> Module {
   )
   |> module.function_call.create()
   |> module.function_call.add(of)
-  |> module.add_import(["dynamic", "decode"])
+  |> module.add_import(["offstage", "dynamic", "decode"])
 }
 
 pub fn string_enum(first: Module, rest: Module) -> Module {
@@ -18,5 +18,5 @@ pub fn string_enum(first: Module, rest: Module) -> Module {
   |> module.function_call.create()
   |> module.function_call.add(first)
   |> module.function_call.add(rest)
-  |> module.add_import(["dynamic", "decode"])
+  |> module.add_import(["offstage", "dynamic", "decode"])
 }

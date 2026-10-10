@@ -7,9 +7,9 @@ import gleam/option
 import gleam/result
 import gleam/set
 import gleam/string
-import surreal/node
-import surreal_ql
-import surreal_type
+import suweal/node
+import suweal/surreal_ql
+import suweal/surreal_type
 
 //-----------------------------------------------------------------------------------------------//
 //                                          Table Info                                           //

@@ -52,14 +52,12 @@ fn list_files(
 /// Define the command-line interface for the tool.
 fn command() {
   clip.command({
-    use backstage <- clip.parameter
+    use offstage <- clip.parameter
     use path <- clip.parameter
 
-    common.Configuration(backstage, path)
+    common.Configuration(offstage, path)
   })
-  |> clip.flag(
-    flag.new("backstage") |> flag.help("Enable backstage integration"),
-  )
+  |> clip.flag(flag.new("offstage") |> flag.help("Enable offstage integration"))
   |> clip.arg(
     arg.new("path")
     |> arg.default("./src")

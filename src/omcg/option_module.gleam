@@ -1,4 +1,4 @@
-import module.{type Module}
+import omcg/module.{type Module}
 
 pub fn type_(inner: Module) -> Module {
   module.binop.access(

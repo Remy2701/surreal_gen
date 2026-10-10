@@ -1,12 +1,12 @@
 import gleam/list
-import module.{type Module}
+import omcg/module.{type Module}
 
 pub fn serializer() -> Module {
   module.binop.access(
     module.identifier.create("serialize"),
     module.identifier.create("Serializer"),
   )
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn serializer_of(of: Module) -> Module {
@@ -20,7 +20,7 @@ pub fn string_enum() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("string_enum"),
   )
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn string_enum_of(values: Module, to_string: Module) -> Module {
@@ -35,7 +35,7 @@ pub fn timestamp() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("timestamp"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn int() -> Module {
@@ -43,7 +43,7 @@ pub fn int() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("int"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn float() -> Module {
@@ -51,7 +51,7 @@ pub fn float() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("float"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn string() -> Module {
@@ -59,7 +59,7 @@ pub fn string() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("string"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn bool() -> Module {
@@ -67,7 +67,7 @@ pub fn bool() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("bool"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn json_value() -> Module {
@@ -75,7 +75,7 @@ pub fn json_value() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("json_value"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn nil() -> Module {
@@ -83,7 +83,7 @@ pub fn nil() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("nil"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn optional() -> Module {
@@ -91,7 +91,7 @@ pub fn optional() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("optional"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn optional_of(inner: Module) -> Module {
@@ -104,7 +104,7 @@ pub fn list() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("list"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn list_of(inner: Module) -> Module {
@@ -114,21 +114,37 @@ pub fn list_of(inner: Module) -> Module {
 
 pub fn identifier() -> Module {
   module.function_call.create(module.binop.access(
-    module.identifier.create("bs_identifier"),
+    module.identifier.create("os_identifier"),
     module.identifier.create("serializer"),
   ))
   |> module.add_aliased_import(
-    ["backstage_surreal", "identifier"],
-    "bs_identifier",
+    ["offstage_suweal", "identifier"],
+    "os_identifier",
   )
+}
+
+pub fn typed_identifier() -> Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("os_identifier"),
+    module.identifier.create("typed_serializer"),
+  ))
+  |> module.add_aliased_import(
+    ["offstage_suweal", "identifier"],
+    "os_identifier",
+  )
+}
+
+pub fn typed_identifier_of(types: Module) -> Module {
+  typed_identifier()
+  |> module.function_call.add(types)
 }
 
 pub fn record() -> Module {
   module.function_call.create(module.binop.access(
-    module.identifier.create("bs_record"),
+    module.identifier.create("os_record"),
     module.identifier.create("serializer"),
   ))
-  |> module.add_aliased_import(["backstage_surreal", "record"], "bs_record")
+  |> module.add_aliased_import(["offstage_suweal", "record"], "os_record")
 }
 
 pub fn record_of(inner: Module, id: Module) -> Module {
@@ -137,12 +153,27 @@ pub fn record_of(inner: Module, id: Module) -> Module {
   |> module.function_call.add(id)
 }
 
+pub fn typed_record() -> Module {
+  module.function_call.create(module.binop.access(
+    module.identifier.create("os_record"),
+    module.identifier.create("typed_serializer"),
+  ))
+  |> module.add_aliased_import(["offstage_suweal", "record"], "os_record")
+}
+
+pub fn typed_record_of(inner: Module, id: Module, types: Module) -> Module {
+  typed_record()
+  |> module.function_call.add(inner)
+  |> module.function_call.add(id)
+  |> module.function_call.add(types)
+}
+
 pub fn point() -> Module {
   module.function_call.create(module.binop.access(
-    module.identifier.create("bs_point"),
+    module.identifier.create("os_point"),
     module.identifier.create("serializer"),
   ))
-  |> module.add_aliased_import(["backstage_surreal", "point"], "bs_point")
+  |> module.add_aliased_import(["offstage_suweal", "point"], "os_point")
 }
 
 pub fn object() -> Module {
@@ -150,7 +181,7 @@ pub fn object() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("object"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn object_of(content: List(Module)) -> Module {
@@ -167,7 +198,7 @@ pub fn field() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("field"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn field_of(
@@ -188,7 +219,7 @@ pub fn optional_field() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("optional_field"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn optional_field_of(
@@ -211,7 +242,7 @@ pub fn build() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("build"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn build_of(context: Module, value: Module) -> Module {
@@ -225,7 +256,7 @@ pub fn success() -> Module {
     module.identifier.create("serialize"),
     module.identifier.create("success"),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 pub fn success_of(inner: Module) -> Module {

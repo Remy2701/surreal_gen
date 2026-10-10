@@ -1,4 +1,4 @@
-import module.{type Module}
+import omcg/module.{type Module}
 
 pub fn decoder() -> Module {
   module.binop.access(

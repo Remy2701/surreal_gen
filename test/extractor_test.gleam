@@ -3,9 +3,9 @@ import extractor
 import gleam/dict
 import gleam/option
 import gleam/result
-import surreal/node
-import surreal_ql
-import surreal_type
+import suweal/node
+import suweal/surreal_ql
+import suweal/surreal_type
 
 //-----------------------------------------------------------------------------------------------//
 //                                         Normal table                                          //
@@ -34,8 +34,8 @@ pub fn extract_regular_table_test() {
           path: "./src/db/test",
           fields: [
             extractor.TableField(
-              dependencies: ["db/test", "surreal/identifier"],
-              name: "id",
+              dependencies: ["db/test", "suweal/identifier"],
+              name: "suweal/identifier",
               type_: surreal_type.Identifier("User"),
               linked_enum: option.None,
               object_fields: [],
@@ -83,9 +83,9 @@ pub fn extract_with_string_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
-              name: "id",
+              name: "suweal/identifier",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
                 "user",
               )),
@@ -142,7 +142,7 @@ pub fn extract_with_int_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -201,7 +201,7 @@ pub fn extract_with_float_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -260,7 +260,7 @@ pub fn extract_with_bool_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -319,7 +319,7 @@ pub fn extract_with_datetime_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -378,7 +378,7 @@ pub fn extract_with_point_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -389,7 +389,7 @@ pub fn extract_with_point_field_test() {
             ),
             extractor.TableField(
               dependencies: [
-                "surreal/point",
+                "suweal/point",
               ],
               name: "location",
               type_: surreal_type.Point,
@@ -439,7 +439,7 @@ pub fn extract_with_identifier_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -451,7 +451,7 @@ pub fn extract_with_identifier_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "parent",
               type_: surreal_type.Identifier("user"),
@@ -501,7 +501,7 @@ pub fn extract_with_record_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -513,7 +513,7 @@ pub fn extract_with_record_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/record",
+                "suweal/record",
               ],
               name: "parent",
               type_: surreal_type.Record("user"),
@@ -563,7 +563,7 @@ pub fn extract_with_optional_string_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -631,7 +631,7 @@ pub fn extract_with_enum_string_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -706,7 +706,7 @@ pub fn extract_with_enum_string_with_none_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -783,7 +783,7 @@ pub fn extract_with_optiona_enum_string_with_null_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -848,7 +848,7 @@ pub fn extract_with_string_array_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -920,7 +920,7 @@ pub fn extract_with_string_array_field_with_constraints_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -996,7 +996,7 @@ pub fn extract_with_nest_fields_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -1070,7 +1070,7 @@ pub fn extract_with_flexible_object_field_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier(common.string_to_pascal_case(
@@ -1124,7 +1124,7 @@ pub fn extract_relation_table_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier("Friend"),
@@ -1189,7 +1189,7 @@ pub fn extract_relation_table_with_in_out_fields_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier("User"),
@@ -1210,7 +1210,7 @@ pub fn extract_relation_table_with_in_out_fields_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/identifier",
+                "suweal/identifier",
               ],
               name: "id",
               type_: surreal_type.Identifier("Friend"),
@@ -1220,7 +1220,7 @@ pub fn extract_relation_table_with_in_out_fields_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/record",
+                "suweal/record",
               ],
               name: "in",
               type_: surreal_type.Record("user"),
@@ -1230,7 +1230,7 @@ pub fn extract_relation_table_with_in_out_fields_test() {
             extractor.TableField(
               dependencies: [
                 "db/test",
-                "surreal/record",
+                "suweal/record",
               ],
               name: "out",
               type_: surreal_type.Record("user"),

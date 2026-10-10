@@ -10,13 +10,13 @@ import gleam/pair
 import gleam/result
 import gleam/set
 import gleam/string
-import module
-import module/backstage_serialize_module
-import module/decode_module
-import module/module_common
-import module/option_module
-import surreal/node
-import surreal_type.{type SurrealType}
+import omcg/decode_module
+import omcg/module
+import omcg/module_common
+import omcg/offstage_serialize_module
+import omcg/option_module
+import suweal/node
+import suweal/surreal_type.{type SurrealType}
 
 // ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 //                                     Table Type Definition                                     //
@@ -48,9 +48,7 @@ fn generate_type_definition_field(
     }
     None -> {
       case field.object_fields {
-        [] -> {
-          module.identifier.create(surreal_type.to_gleam_type_str(field.type_))
-        }
+        [] -> surreal_type.to_gleam_type(field.type_)
         [_, ..] ->
           case field.type_ {
             surreal_type.Array(surreal_type.Object) -> {
@@ -68,7 +66,7 @@ fn generate_type_definition_field(
                 "Warning: unsupported object field type for `"
                 <> field.name
                 <> "`: "
-                <> surreal_type.to_gleam_type_str(field.type_),
+                <> module.to_string(surreal_type.to_gleam_type(field.type_)),
               )
               module.identifier.create(common.string_to_pascal_case(field.name))
             }
@@ -153,7 +151,7 @@ fn generate_identifier_to_json(name: String) {
     module.identifier.create("string"),
   ))
   |> module.add_import(["gleam", "json"])
-  |> module.add_import(["surreal", "identifier"])
+  |> module.add_import(["suweal", "identifier"])
 }
 
 fn generate_record_to_json(name: String, inner: String) {
@@ -170,7 +168,7 @@ fn generate_record_to_json(name: String, inner: String) {
       module.identifier.create("to_json"),
     )),
   )
-  |> module.add_import(["surreal", "record"])
+  |> module.add_import(["suweal", "record"])
 }
 
 fn generate_point_to_json(name: String) {
@@ -179,7 +177,7 @@ fn generate_point_to_json(name: String) {
     module.identifier.create("to_json"),
   ))
   |> module.function_call.add(module.identifier.create(name))
-  |> module.add_import(["surreal", "point"])
+  |> module.add_import(["suweal", "point"])
 }
 
 fn generate_bool_to_json(name: String) {
@@ -257,6 +255,57 @@ fn generate_to_json_for_type(
 }
 
 fn generate_type_to_json(
+  config: common.Configuration,
+  name: String,
+  fields: List(extractor.TableField),
+  prefix: String,
+) -> module.Module {
+  case config.offstage {
+    True -> generate_offstage_type_to_json(name, prefix)
+    False -> generate_gleam_type_to_json(name, fields, prefix)
+  }
+}
+
+fn generate_offstage_type_to_json(
+  name: String,
+  prefix: String,
+) -> module.Module {
+  module.function_definition.create()
+  |> module.function_definition.public()
+  |> module.function_definition.with_name(prefix <> "to_json")
+  |> module.function_definition.add_parameter(
+    "self",
+    module.identifier.create(common.string_to_pascal_case(name)),
+  )
+  |> module.function_definition.with_return_type(module.binop.access(
+    module.identifier.create("json"),
+    module.identifier.create("Json"),
+  ))
+  |> module.function_definition.add(
+    module.binop.access(
+      module.identifier.create("encode"),
+      module.identifier.create("encode_json"),
+    )
+    |> module.function_call.create()
+    |> module.function_call.add(module.identifier.create("self"))
+    |> module.function_call.add(
+      module.binop.access(
+        module.identifier.create("serialize"),
+        module.identifier.create("encoder"),
+      )
+      |> module.function_call.create()
+      |> module.function_call.add(
+        module.identifier.create(prefix <> "serializer")
+        |> module.function_call.create(),
+      )
+      |> module.add_import(["offstage", "dynamic", "serialize"]),
+    )
+    |> module.add_import(["offstage", "dynamic", "encode"]),
+  )
+  |> module.add_import(["gleam", "json"])
+}
+
+fn generate_gleam_type_to_json(
   name: String,
   fields: List(extractor.TableField),
   prefix: String,
@@ -412,8 +461,8 @@ fn generate_enum_to_decoder(
   name: String,
   values: List(String),
 ) -> module.Module {
-  case config.backstage {
-    True -> generate_enum_to_backstage_serializer(name, values)
+  case config.offstage {
+    True -> generate_enum_to_offstage_serializer(name, values)
     False -> generate_enum_to_gleam_decoder(name, values)
   }
 }
@@ -461,7 +510,7 @@ fn generate_enum_to_gleam_decoder(
   |> module.add_import(["gleam", "dynamic", "decode"])
 }
 
-fn generate_enum_to_backstage_serializer(
+fn generate_enum_to_offstage_serializer(
   name: String,
   values: List(String),
 ) -> module.Module {
@@ -469,9 +518,9 @@ fn generate_enum_to_backstage_serializer(
   |> module.function_definition.with_name(name <> "_serializer")
   |> module.function_definition.public()
   |> module.function_definition.with_return_type(
-    backstage_serialize_module.serializer_of(module_common.type_identifier(name)),
+    offstage_serialize_module.serializer_of(module_common.type_identifier(name)),
   )
-  |> module.function_definition.add(backstage_serialize_module.string_enum_of(
+  |> module.function_definition.add(offstage_serialize_module.string_enum_of(
     values
       |> list.map(module_common.type_identifier)
       |> module.literal.list(),
@@ -701,7 +750,7 @@ fn generate_type_to_surql(
       ),
     ),
   )
-  |> module.add_import(["surreal_ql"])
+  |> module.add_import(["suweal", "surreal_ql"])
 }
 
 // ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
@@ -709,14 +758,14 @@ fn generate_type_to_surql(
 // ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
 
 fn decoder_of_datetime(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_datetime()
+  case config.offstage {
+    True -> offstage_serializer_of_datetime()
     False -> gleam_decoder_of_datetime()
   }
 }
 
-fn backstage_serializer_of_datetime() -> module.Module {
-  backstage_serialize_module.timestamp()
+fn offstage_serializer_of_datetime() -> module.Module {
+  offstage_serialize_module.timestamp()
 }
 
 fn gleam_decoder_of_datetime() -> module.Module {
@@ -764,14 +813,14 @@ fn gleam_decoder_of_datetime() -> module.Module {
 }
 
 fn decoder_of_int(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_int()
+  case config.offstage {
+    True -> offstage_serializer_of_int()
     False -> gleam_decoder_of_int()
   }
 }
 
-fn backstage_serializer_of_int() -> module.Module {
-  backstage_serialize_module.int()
+fn offstage_serializer_of_int() -> module.Module {
+  offstage_serialize_module.int()
 }
 
 fn gleam_decoder_of_int() -> module.Module {
@@ -783,14 +832,14 @@ fn gleam_decoder_of_int() -> module.Module {
 }
 
 fn decoder_of_float(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_float()
+  case config.offstage {
+    True -> offstage_serializer_of_float()
     False -> gleam_decoder_of_float()
   }
 }
 
-fn backstage_serializer_of_float() -> module.Module {
-  backstage_serialize_module.float()
+fn offstage_serializer_of_float() -> module.Module {
+  offstage_serialize_module.float()
 }
 
 fn gleam_decoder_of_float() -> module.Module {
@@ -825,14 +874,14 @@ fn gleam_decoder_of_float() -> module.Module {
 }
 
 fn decoder_of_string(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_string()
+  case config.offstage {
+    True -> offstage_serializer_of_string()
     False -> gleam_decoder_of_string()
   }
 }
 
-fn backstage_serializer_of_string() -> module.Module {
-  backstage_serialize_module.string()
+fn offstage_serializer_of_string() -> module.Module {
+  offstage_serialize_module.string()
 }
 
 fn gleam_decoder_of_string() -> module.Module {
@@ -843,37 +892,63 @@ fn gleam_decoder_of_string() -> module.Module {
   |> module.add_import(["gleam", "dynamic", "decode"])
 }
 
-fn decoder_of_identifier(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_identifier()
-    False -> gleam_decoder_of_identifier()
+fn decoder_of_identifier(
+  config: common.Configuration,
+  inner: String,
+) -> module.Module {
+  case config.offstage {
+    True -> offstage_serializer_of_identifier(inner)
+    False -> gleam_decoder_of_identifier(inner)
   }
 }
 
-fn backstage_serializer_of_identifier() -> module.Module {
-  backstage_serialize_module.identifier()
+fn offstage_serializer_of_identifier(inner: String) -> module.Module {
+  offstage_serialize_module.typed_identifier_of(
+    module.literal.list([
+      case string.split(inner, ".") {
+        [table, _, ..] ->
+          module.binop.access(
+            module.identifier.create(table),
+            module.identifier.create("table_name"),
+          )
+        _ -> module.identifier.create("table_name")
+      },
+    ]),
+  )
 }
 
-fn gleam_decoder_of_identifier() -> module.Module {
+fn gleam_decoder_of_identifier(inner: String) -> module.Module {
   module.function_call.create(module.binop.access(
     module.identifier.create("identifier"),
-    module.identifier.create("decoder"),
+    module.identifier.create("typed_decoder"),
   ))
-  |> module.add_import(["surreal", "identifier"])
+  |> module.function_call.add(
+    module.literal.list([
+      case string.split(inner, ".") {
+        [table, _, ..] ->
+          module.binop.access(
+            module.identifier.create(table),
+            module.identifier.create("table_name"),
+          )
+        _ -> module.identifier.create("table_name")
+      },
+    ]),
+  )
+  |> module.add_import(["suweal", "identifier"])
 }
 
 fn decoder_of_record(
   config: common.Configuration,
   inner: String,
 ) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_record(inner)
+  case config.offstage {
+    True -> offstage_serializer_of_record(inner)
     False -> gleam_decoder_of_record(inner)
   }
 }
 
-fn backstage_serializer_of_record(inner: String) -> module.Module {
-  backstage_serialize_module.record_of(
+fn offstage_serializer_of_record(inner: String) -> module.Module {
+  offstage_serialize_module.typed_record_of(
     module.function_call.create(module.binop.access(
       module.identifier.create(
         string.split(inner, ".") |> list.first() |> result.unwrap(inner),
@@ -886,13 +961,23 @@ fn backstage_serializer_of_record(inner: String) -> module.Module {
         module.identifier.create("data"),
         module.identifier.create("id"),
       )),
+    module.literal.list([
+      case string.split(inner, ".") {
+        [table, _, ..] ->
+          module.binop.access(
+            module.identifier.create(table),
+            module.identifier.create("table_name"),
+          )
+        _ -> module.identifier.create("table_name")
+      },
+    ]),
   )
 }
 
 fn gleam_decoder_of_record(inner: String) -> module.Module {
   module.function_call.create(module.binop.access(
     module.identifier.create("record"),
-    module.identifier.create("decoder"),
+    module.identifier.create("typed_decoder"),
   ))
   |> module.function_call.add(
     module.function_call.create(module.binop.access(
@@ -910,18 +995,30 @@ fn gleam_decoder_of_record(inner: String) -> module.Module {
       module.identifier.create("id"),
     )),
   )
-  |> module.add_import(["surreal", "record"])
+  |> module.function_call.add(
+    module.literal.list([
+      case string.split(inner, ".") {
+        [table, _, ..] ->
+          module.binop.access(
+            module.identifier.create(table),
+            module.identifier.create("table_name"),
+          )
+        _ -> module.identifier.create("table_name")
+      },
+    ]),
+  )
+  |> module.add_import(["suweal", "record"])
 }
 
 fn decoder_of_bool(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_bool()
+  case config.offstage {
+    True -> offstage_serializer_of_bool()
     False -> gleam_decoder_of_bool()
   }
 }
 
-fn backstage_serializer_of_bool() -> module.Module {
-  backstage_serialize_module.bool()
+fn offstage_serializer_of_bool() -> module.Module {
+  offstage_serialize_module.bool()
 }
 
 fn gleam_decoder_of_bool() -> module.Module {
@@ -933,14 +1030,14 @@ fn gleam_decoder_of_bool() -> module.Module {
 }
 
 fn decoder_of_point(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_point()
+  case config.offstage {
+    True -> offstage_serializer_of_point()
     False -> gleam_decoder_of_point()
   }
 }
 
-fn backstage_serializer_of_point() -> module.Module {
-  backstage_serialize_module.point()
+fn offstage_serializer_of_point() -> module.Module {
+  offstage_serialize_module.point()
 }
 
 fn gleam_decoder_of_point() -> module.Module {
@@ -948,18 +1045,18 @@ fn gleam_decoder_of_point() -> module.Module {
     module.identifier.create("point"),
     module.identifier.create("decoder"),
   ))
-  |> module.add_import(["surreal", "point"])
+  |> module.add_import(["suweal", "point"])
 }
 
 fn decoder_of_object(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_object()
+  case config.offstage {
+    True -> offstage_serializer_of_object()
     False -> gleam_decoder_of_object()
   }
 }
 
-fn backstage_serializer_of_object() -> module.Module {
-  backstage_serialize_module.json_value()
+fn offstage_serializer_of_object() -> module.Module {
+  offstage_serialize_module.json_value()
 }
 
 fn gleam_decoder_of_object() -> module.Module {
@@ -974,17 +1071,17 @@ fn decoder_of_option(
   config: common.Configuration,
   inner: SurrealType,
 ) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_option(config, inner)
+  case config.offstage {
+    True -> offstage_serializer_of_option(config, inner)
     False -> gleam_decoder_of_option(config, inner)
   }
 }
 
-fn backstage_serializer_of_option(
+fn offstage_serializer_of_option(
   config: common.Configuration,
   inner: SurrealType,
 ) -> module.Module {
-  backstage_serialize_module.optional_of(decoder_of(config, inner))
+  offstage_serialize_module.optional_of(decoder_of(config, inner))
 }
 
 fn gleam_decoder_of_option(
@@ -1003,17 +1100,17 @@ fn decoder_of_array(
   config: common.Configuration,
   inner: SurrealType,
 ) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_array(config, inner)
+  case config.offstage {
+    True -> offstage_serializer_of_array(config, inner)
     False -> gleam_decoder_of_array(config, inner)
   }
 }
 
-fn backstage_serializer_of_array(
+fn offstage_serializer_of_array(
   config: common.Configuration,
   inner: SurrealType,
 ) -> module.Module {
-  backstage_serialize_module.list_of(decoder_of(config, inner))
+  offstage_serialize_module.list_of(decoder_of(config, inner))
 }
 
 fn gleam_decoder_of_array(
@@ -1029,14 +1126,14 @@ fn gleam_decoder_of_array(
 }
 
 fn decoder_of_none(config: common.Configuration) -> module.Module {
-  case config.backstage {
-    True -> backstage_serializer_of_none()
+  case config.offstage {
+    True -> offstage_serializer_of_none()
     False -> gleam_decoder_of_none()
   }
 }
 
-fn backstage_serializer_of_none() -> module.Module {
-  backstage_serialize_module.nil()
+fn offstage_serializer_of_none() -> module.Module {
+  offstage_serialize_module.nil()
 }
 
 fn gleam_decoder_of_none() -> module.Module {
@@ -1057,7 +1154,7 @@ fn decoder_of(
     surreal_type.Int -> decoder_of_int(config)
     surreal_type.Float -> decoder_of_float(config)
     surreal_type.String -> decoder_of_string(config)
-    surreal_type.Identifier(_) -> decoder_of_identifier(config)
+    surreal_type.Identifier(inner) -> decoder_of_identifier(config, inner)
     surreal_type.Record(inner) -> decoder_of_record(config, inner)
     surreal_type.Bool -> decoder_of_bool(config)
     surreal_type.Point -> decoder_of_point(config)
@@ -1074,13 +1171,13 @@ fn generate_type_decoder(
   fields: List(extractor.TableField),
   prefix: String,
 ) -> module.Module {
-  case config.backstage {
-    True -> backstage_generate_type_serializer(config, name, fields, prefix)
+  case config.offstage {
+    True -> offstage_generate_type_serializer(config, name, fields, prefix)
     False -> gleam_generate_type_decoder(config, name, fields, prefix)
   }
 }
 
-fn backstage_generate_type_serializer(
+fn offstage_generate_type_serializer(
   config: common.Configuration,
   name: String,
   fields: List(extractor.TableField),
@@ -1090,9 +1187,9 @@ fn backstage_generate_type_serializer(
   |> module.function_definition.with_name(prefix <> "serializer")
   |> module.function_definition.public()
   |> module.function_definition.with_return_type(
-    backstage_serialize_module.serializer_of(module_common.type_identifier(name)),
+    offstage_serialize_module.serializer_of(module_common.type_identifier(name)),
   )
-  |> module.function_definition.add(backstage_serialize_module.object_of(
+  |> module.function_definition.add(offstage_serialize_module.object_of(
     list.map(fields, fn(field) {
       let inner_serializer = case
         field.linked_enum,
@@ -1100,7 +1197,7 @@ fn backstage_generate_type_serializer(
         field.type_
       {
         option.Some(enum), _, surreal_type.Option(_) -> {
-          backstage_serialize_module.optional_of(
+          offstage_serialize_module.optional_of(
             module.function_call.create(module.identifier.create(
               enum <> "_serializer",
             )),
@@ -1115,7 +1212,7 @@ fn backstage_generate_type_serializer(
             field.name <> "_serializer",
           ))
         _, [_, ..], surreal_type.Array(surreal_type.Object) -> {
-          backstage_serialize_module.list_of(
+          offstage_serialize_module.list_of(
             module.function_call.create(module.identifier.create(
               field.name <> "_serializer",
             )),
@@ -1136,7 +1233,7 @@ fn backstage_generate_type_serializer(
       case field.type_ {
         surreal_type.Option(_) -> {
           module.use_expression.create(
-            backstage_serialize_module.optional_field_of(
+            offstage_serialize_module.optional_field_of(
               module.identifier.create("context"),
               module.literal.string(field.name),
               option_module.none(),
@@ -1146,7 +1243,7 @@ fn backstage_generate_type_serializer(
           )
         }
         _ -> {
-          module.use_expression.create(backstage_serialize_module.field_of(
+          module.use_expression.create(offstage_serialize_module.field_of(
             module.identifier.create("context"),
             module.literal.string(field.name),
             inner_serializer,
@@ -1158,7 +1255,7 @@ fn backstage_generate_type_serializer(
       |> module.use_expression.add(field.name)
     })
     |> list.append([
-      backstage_serialize_module.build_of(
+      offstage_serialize_module.build_of(
         module.identifier.create("context"),
         module_common.type_identifier(name)
           |> module.function_call.create()
@@ -1172,7 +1269,7 @@ fn backstage_generate_type_serializer(
       ),
     ]),
   ))
-  |> module.add_import(["dynamic", "serialize"])
+  |> module.add_import(["offstage", "dynamic", "serialize"])
 }
 
 fn gleam_generate_type_decoder(
@@ -1282,7 +1379,7 @@ fn retrieve_dependencies_(
 ) -> set.Set(String) {
   list.fold(fields, set.new(), fn(acc, field) {
     let acc = case field.type_ {
-      surreal_type.Datetime -> acc
+      surreal_type.Datetime -> acc |> set.insert("gleam/time/timestamp")
       surreal_type.Option(surreal_type.Datetime) -> acc
       surreal_type.Identifier(name) ->
         acc
@@ -1297,6 +1394,7 @@ fn retrieve_dependencies_(
         }
       surreal_type.Record(name) ->
         acc
+        |> set.insert("suweal/record")
         |> case
           dict.get(
             tables,
@@ -1326,7 +1424,8 @@ fn retrieve_dependencies(
 ) -> module.Module {
   list.fold(fields, module, fn(module, field) {
     let module = case field.type_ {
-      surreal_type.Datetime -> module
+      surreal_type.Datetime ->
+        module.add_import(module, ["gleam", "time", "timestamp"])
       surreal_type.Option(surreal_type.Datetime) ->
         module
         |> module.add_import(["gleam", "option"])
@@ -1347,6 +1446,7 @@ fn retrieve_dependencies(
         }
       surreal_type.Record(name) ->
         module
+        |> module.add_import(["suweal", "record"])
         |> case
           dict.get(
             tables,
@@ -1386,11 +1486,14 @@ fn resolve_dependencies(
           |> module.add_import(["gleam", "option"]),
         list.append(fields, [field]),
       )
-      surreal_type.Identifier(_) -> #(module, list.append(fields, [field]))
+      surreal_type.Identifier(_) -> #(
+        module.add_import(module, ["suweal", "identifier"]),
+        list.append(fields, [field]),
+      )
       surreal_type.Record(name) -> {
         let table = dict.get(tables, string.lowercase(name))
 
-        let module = module.add_import(module, ["surreal", "record"])
+        let module = module.add_import(module, ["suweal", "record"])
         let module = case table {
           Ok(info) ->
             module.add_import(
@@ -1421,7 +1524,7 @@ fn resolve_dependencies(
       surreal_type.Array(surreal_type.Record(name)) -> {
         let table = dict.get(tables, string.lowercase(name))
 
-        let module = module.add_import(module, ["surreal", "record"])
+        let module = module.add_import(module, ["suweal", "record"])
         let module = case table {
           Ok(info) ->
             module.add_import(
@@ -1452,7 +1555,7 @@ fn resolve_dependencies(
       surreal_type.Option(surreal_type.Record(name)) -> {
         let table = dict.get(tables, string.lowercase(name))
 
-        let module = module.add_import(module, ["surreal", "record"])
+        let module = module.add_import(module, ["suweal", "record"])
         let module = case table {
           Ok(info) ->
             module.add_import(
@@ -1484,9 +1587,12 @@ fn resolve_dependencies(
         module.add_import(module, ["gleam", "option"]),
         list.append(fields, [field]),
       )
-      surreal_type.Object -> #(module, list.append(fields, [field]))
+      surreal_type.Object -> #(
+        module.add_import(module, ["json_value"]),
+        list.append(fields, [field]),
+      )
       surreal_type.Point -> #(
-        module.add_import(module, ["surreal", "point"]),
+        module.add_import(module, ["suweal", "point"]),
         list.append(fields, [field]),
       )
       _ -> #(module, list.append(fields, [field]))
@@ -1592,7 +1698,7 @@ fn link_type(
               Ok(current) ->
                 set.from_list([
                   common.to_gleam_path(current.path),
-                  "surreal/record",
+                  "suweal/record",
                 ])
               _ -> {
                 io.println("Warning: Could not resolve table `" <> inner <> "`")
@@ -1647,6 +1753,7 @@ fn generate_nest_field(
           field.name <> "_",
         ))
         |> module.root.add(generate_type_to_json(
+          config,
           field.name,
           fields,
           field.name <> "_",
@@ -1898,7 +2005,11 @@ fn resolve_table_fields(
             "Warning: multiple types resolved for `"
             <> node.to_string(node)
             <> "`: "
-            <> string.inspect(list.map(types, surreal_type.to_gleam_type_str)),
+            <> string.inspect(
+              list.map(types, fn(t) {
+                module.to_string(surreal_type.to_gleam_type(t))
+              }),
+            ),
           )
           Error(Nil)
         }
@@ -2168,8 +2279,8 @@ fn generate_table_specs(
   config: common.Configuration,
   name: String,
 ) -> module.Module {
-  case config.backstage {
-    True -> generate_backstage_table_specs(name)
+  case config.offstage {
+    True -> generate_offstage_table_specs(name)
     False -> generate_gleam_table_specs(name)
   }
 }
@@ -2241,10 +2352,10 @@ fn generate_gleam_table_specs(name: String) -> module.Module {
       module.identifier.create("decoder"),
     ),
   )
-  |> module.add_import(["surreal", "table_spec"])
+  |> module.add_import(["suweal", "table_spec"])
 }
 
-fn generate_backstage_table_specs(name: String) -> module.Module {
+fn generate_offstage_table_specs(name: String) -> module.Module {
   module.function_definition.create()
   |> module.function_definition.public()
   |> module.function_definition.with_name("specs")
@@ -2312,10 +2423,10 @@ fn generate_backstage_table_specs(name: String) -> module.Module {
     ),
   )
   |> module.add_aliased_import(
-    ["backstage_surreal", "table_spec"],
+    ["offstage_suweal", "table_spec"],
     "bs_table_spec",
   )
-  |> module.add_import(["surreal", "table_spec"])
+  |> module.add_import(["suweal", "table_spec"])
 }
 
 // ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––– //
@@ -2339,7 +2450,7 @@ fn generate_parameters_builder(
               module.identifier.create("surreal_ql"),
               module.identifier.create("SurrealQL"),
             )
-              |> module.add_import(["surreal_ql"]),
+              |> module.add_import(["suweal", "surreal_ql"]),
           ]),
         ),
       ),
@@ -2366,7 +2477,7 @@ fn generate_parameters_builder(
       }),
     ),
   )
-  |> module.add_import(["surreal_ql"])
+  |> module.add_import(["suweal", "surreal_ql"])
 }
 
 fn do_define_normal_table_node(
@@ -2409,7 +2520,7 @@ fn do_define_normal_table_node(
     )
     |> module.root.add(generate_type_definition(name, fields))
     |> module.root.add(generate_type_decoder(config, name, fields, ""))
-    |> module.root.add(generate_type_to_json(name, fields, ""))
+    |> module.root.add(generate_type_to_json(config, name, fields, ""))
     |> module.root.add(generate_type_to_surql(name, fields, ""))
     |> module.root.add(generate_table_specs(config, name))
 
@@ -2482,7 +2593,7 @@ fn do_define_relation_table_node(
     )
     |> module.root.add(generate_type_definition(name, fields))
     |> module.root.add(generate_type_decoder(config, name, fields, ""))
-    |> module.root.add(generate_type_to_json(name, fields, ""))
+    |> module.root.add(generate_type_to_json(config, name, fields, ""))
     |> module.root.add(generate_type_to_surql(name, fields, ""))
     |> module.root.add(generate_table_specs(config, name))
 
@@ -2532,7 +2643,7 @@ fn do_select_node(
           |> module.const_definition.public(),
         )
 
-      let module = case config.backstage {
+      let module = case config.offstage {
         True ->
           module
           |> module.root.add(
@@ -2613,7 +2724,12 @@ fn do_select_node(
                 fields,
                 "",
               ))
-              |> module.root.add(generate_type_to_json(field.name, fields, ""))
+              |> module.root.add(generate_type_to_json(
+                config,
+                field.name,
+                fields,
+                "",
+              ))
             }
           }
         })
@@ -2628,7 +2744,12 @@ fn do_select_node(
           fields,
           "",
         ))
-        |> module.root.add(generate_type_to_json("QueryResult", fields, ""))
+        |> module.root.add(generate_type_to_json(
+          config,
+          "QueryResult",
+          fields,
+          "",
+        ))
 
       let dependencies =
         set.from_list([path |> string.join("/")])
@@ -2636,6 +2757,7 @@ fn do_select_node(
           list.flat_map(table_info.fields, fn(f) { f.dependencies })
           |> set.from_list,
         )
+        |> set.union(retrieve_dependencies_(fields, tables))
 
       let module =
         dependencies
@@ -2710,7 +2832,7 @@ fn do_update_node(
 
   let module =
     module
-    |> module.root.add(case config.backstage {
+    |> module.root.add(case config.offstage {
       True ->
         module.const_definition.create(
           "serializer",
@@ -2813,7 +2935,7 @@ fn do_create_node(
 
   let module =
     module
-    |> module.root.add(case config.backstage {
+    |> module.root.add(case config.offstage {
       True ->
         module.const_definition.create(
           "serializer",
@@ -2918,7 +3040,7 @@ fn do_delete_node(
         )
         |> module.add_import(["gleam", "json"])
 
-      let module = case config.backstage {
+      let module = case config.offstage {
         True ->
           module
           |> module.root.add(
@@ -2932,7 +3054,7 @@ fn do_delete_node(
               )),
             ),
           )
-          |> module.add_import(["dynamic", "serialize"])
+          |> module.add_import(["offstage", "dynamic", "serialize"])
         False ->
           module
           |> module.root.add(
@@ -3057,7 +3179,7 @@ fn do_relate_node(
 
   let module =
     module
-    |> module.root.add(case config.backstage {
+    |> module.root.add(case config.offstage {
       True ->
         module.const_definition.create(
           "serializer",
