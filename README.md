@@ -1,13 +1,13 @@
-# suweal_gen
+# Suweal Generator
 
-[![Package Version](https://img.shields.io/hexpm/v/suweal_gen_unpublished)](https://hex.pm/packages/suweal_gen_unpublished)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/suweal_gen_unpublished/)
+[![Package Version](https://img.shields.io/hexpm/v/suweal_gen)](https://hex.pm/packages/suweal_gen)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/suweal_gen/)
 
 An (experimental) code generation library for .surql files.
 
 ```toml
 [dev_dependencies]
-suweal_gen = { git = "https://github.com/Remy2701/suweal_gen.git", ref = "v0.2.2" }
+suweal_gen = ">= 0.3.0 and < 1.0.0"
 ```
 
 # Running the generator
@@ -21,4 +21,3 @@ gleam run -m suweal_gen
 ```sh
 gleam run -m suweal_gen -- --offstage
 ```
-
