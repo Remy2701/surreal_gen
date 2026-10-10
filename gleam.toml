@@ -1,6 +1,10 @@
 name = "suweal_gen"
 version = "0.3.0"
 
+description = "Generate gleam type definition, decoders and more from .surql"
+licences = ["Apache-2.0"]
+repository = { type = "github", user = "Remy2701", repo = "suweal_gen" }
+
 [dependencies]
 gleam_stdlib = ">= 1.0.0 and < 2.0.0"
 simplifile = ">= 2.4.0 and < 3.0.0"
