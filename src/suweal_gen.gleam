@@ -53,11 +53,15 @@ fn list_files(
 fn command() {
   clip.command({
     use offstage <- clip.parameter
+    use service <- clip.parameter
     use path <- clip.parameter
 
-    common.Configuration(offstage, path)
+    common.Configuration(offstage, service, path)
   })
   |> clip.flag(flag.new("offstage") |> flag.help("Enable offstage integration"))
+  |> clip.flag(
+    flag.new("service") |> flag.help("Enable suweal_service integration"),
+  )
   |> clip.arg(
     arg.new("path")
     |> arg.default("./src")

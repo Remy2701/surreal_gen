@@ -5,7 +5,7 @@ import gleam/result
 import gleam/string
 
 pub type Configuration {
-  Configuration(offstage: Bool, path: String)
+  Configuration(offstage: Bool, service: Bool, path: String)
 }
 
 //-----------------------------------------------------------------------------------------------//
